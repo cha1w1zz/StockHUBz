@@ -2,10 +2,10 @@
 const MODEL = "google/gemini-2.5-flash-lite";
 const NEWS_PER_STOCK = 4;
 const DEFAULT_STOCKS = ["NVDA", "MSFT", "GOOGL", "AMD", "PLTR"]; // AI theme
-const MAX_STOCKS_ADMIN = 10;
+const MAX_STOCKS_ADMIN = 15;
 const MAX_STOCKS_USER = 5;
 const DEFAULT_TOPICS = ["artificial intelligence AI industry"];
-const MAX_TOPICS_ADMIN = 3;
+const MAX_TOPICS_ADMIN = 5;
 const MAX_TOPICS_USER = 2;
 const NEWS_PER_TOPIC = 5;
 const MAX_USERS = 10; // including the admin
@@ -229,7 +229,7 @@ async function summarize(env, data) {
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY.trim()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 2000, temperature: 0.2 }),
+    body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 4000, temperature: 0.2 }),
   });
   if (!r.ok) throw new Error(`OpenRouter ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const j = await r.json();
@@ -281,7 +281,17 @@ async function pushSummary(env, userId, cache = new Map(), skipEmpty = false, sl
   }
   const now = new Date(Date.now() + 7 * 3600 * 1000);
   const stamp = `${String(now.getUTCDate()).padStart(2, "0")}/${String(now.getUTCMonth() + 1).padStart(2, "0")} ${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
-  await push(`📈 สรุปข่าว ${stamp}\n\n${summary.slice(0, 4600)}\n\n(ไม่ใช่คำแนะนำการลงทุน)`);
+  // LINE text cap is 5000 chars and a push takes up to 5 messages: split on blank lines so long summaries aren't cut
+  const chunks = [];
+  let cur = "";
+  for (const block of `📈 สรุปข่าว ${stamp}\n\n${summary}\n\n(ไม่ใช่คำแนะนำการลงทุน)`.split("\n\n")) {
+    if (cur && cur.length + block.length + 2 > 4500) {
+      chunks.push(cur);
+      cur = block;
+    } else cur = cur ? `${cur}\n\n${block}` : block;
+  }
+  if (cur) chunks.push(cur);
+  await line(env, "push", { to: userId, messages: chunks.slice(0, 5).flatMap((c) => text(c)) });
 }
 
 async function validSignature(env, body, sig) {
