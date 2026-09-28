@@ -153,6 +153,26 @@ async function recipients(env) {
   return [adminId(env), ...members.filter((m) => m !== adminId(env))];
 }
 
+// Drop non-news results (quote/profile pages, price tables, listicles, ads) and near-duplicates.
+const JUNK_TITLE = [
+  /stock price[, ]/i, /share price/i, /quote\b.*\bhistory/i, /price,? news,? quote/i,
+  /ราคาหุ้น.*(ข่าว|ใบเสนอราคา|ประวัติ)/, /ใบเสนอราคา/,
+  /\b(company )?profile\b/i, /\bhistorical (prices|data)\b/i, /\bstock forecast\b/i, /\bprice target\b.*\b(2030|2035|2040)\b/i,
+  /\b(should you buy|is it a buy|better buy|buy now)\b/i, /\b\d+ (best|top) stocks?\b/i,
+];
+const JUNK_SOURCE = /\s-\s(yahoo finance( \w+)?|investing\.com|marketbeat|stocktwits|tipranks|macrotrends|companiesmarketcap|robinhood|public\.com|stockanalysis)\s*$/i;
+function cleanTitles(titles) {
+  const seen = new Set();
+  return titles.filter((t) => {
+    if (JUNK_TITLE.some((re) => re.test(t))) return false;
+    if (JUNK_SOURCE.test(t) && /(price|quote|history|ราคา|profile)/i.test(t)) return false;
+    const key = t.replace(/\s-\s[^-]+$/, "").toLowerCase().replace(/[^a-z0-9ก-๙]/g, "").slice(0, 50);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STOCK) {
   const q = encodeURIComponent(query);
   // Google sometimes returns empty/blocked when many requests fire at once, so retry and widen the window
@@ -167,7 +187,8 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
       const titles = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].map((m) =>
         m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()
       );
-      if (titles.length) return titles.slice(0, limit).map((t) => `- ${t}`);
+      const good = cleanTitles(titles);
+      if (good.length) return good.slice(0, limit).map((t) => `- ${t}`);
     } catch {}
   }
   return [];
@@ -220,6 +241,7 @@ async function summarize(env, data) {
     "- แปลพาดหัวข่าวเป็นภาษาไทยทุกข้อ ห้ามคัดลอกประโยคภาษาอังกฤษ (ยกเว้นชื่อบริษัท ตัวย่อหุ้น และศัพท์เฉพาะ เช่น AI, GPU)\n" +
     "- ทุกหุ้นต้องมีครบทั้ง 4 บรรทัดตามแบบด้านล่าง ห้ามข้ามบรรทัดไหนเด็ดขาด โดยเฉพาะ 'จับตา'\n" +
     "- ใช้เฉพาะตัวเลขและพาดหัวที่ให้มา ห้ามเดา ห้ามแนะนำซื้อขาย ข้อมูลไม่พอให้เขียนว่า ไม่มีข้อมูลเพิ่มเติม\n" +
+    "- เลือกเฉพาะข่าวที่นักลงทุนอยากอ่านจริง (ผลประกอบการ ดีลใหญ่ ผลิตภัณฑ์ กฎหมาย ผู้บริหาร) ข้ามหน้าราคา/ประวัติหุ้น/บทความแนะนำซื้อ\n" +
     "- กระชับ แต่ห้ามตัดบรรทัด\n\n" +
     "แบบสำหรับส่วน '## หัวข้อ:' (ทีละหัวข้อ):\n" +
     "📰 ชื่อหัวข้อ\n• ข่าวเด่น 2-3 ข้อ แปลเป็นไทย\n\n" +
