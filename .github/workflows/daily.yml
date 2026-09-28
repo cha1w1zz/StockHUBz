@@ -1,0 +1,29 @@
+name: Daily stock news to LINE
+
+on:
+  schedule:
+    - cron: "0 2 * * *"    # 09:00 Bangkok
+    - cron: "30 10 * * *"  # 17:30 Bangkok
+  workflow_dispatch:        # "Run workflow" button for manual test
+
+permissions:
+  actions: write  # keepalive step below
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests yfinance
+      - run: python news.py
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+      # GitHub pauses schedules after 60 days without repo activity; re-enabling resets that timer.
+      - run: gh workflow enable daily.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
