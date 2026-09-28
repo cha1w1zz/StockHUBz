@@ -66,6 +66,49 @@ function welcomeCard(isNew = false) {
   }];
 }
 
+// Admin-only card: member list with a kick button per member, plus shortcuts.
+async function adminCard(env) {
+  const members = await getMembers(env);
+  const rows = [];
+  for (const [i, m] of members.entries()) {
+    const u = (await getUser(env, m)) || { stocks: [], topics: [] };
+    rows.push({
+      type: "box", layout: "horizontal", alignItems: "center", margin: "md",
+      contents: [
+        { type: "box", layout: "vertical", flex: 1, contents: [
+          { type: "text", text: `${i + 1}. ...${m.slice(-6)}`, size: "sm", weight: "bold" },
+          { type: "text", text: `หุ้น ${u.stocks.length} · หัวข้อ ${u.topics.length}${u.rounds && u.rounds !== "both" ? " · " + (u.rounds === "am" ? "เช้า" : "เย็น") : ""}`, size: "xxs", color: "#888888" },
+        ] },
+        { type: "button", height: "sm", style: "secondary", flex: 0, action: { type: "message", label: "เตะ", text: `เตะ ${i + 1}` } },
+      ],
+    });
+  }
+  return [{
+    type: "flex",
+    altText: `แผงแอดมิน: ผู้ใช้ ${members.length + 1}/${MAX_USERS}`,
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box", layout: "vertical", backgroundColor: "#1F2937", paddingAll: "16px",
+        contents: [
+          { type: "text", text: "🛠 แผงแอดมิน MARKII", color: "#FFFFFF", weight: "bold", size: "lg" },
+          { type: "text", text: `ผู้ใช้ ${members.length + 1}/${MAX_USERS} (รวมคุณ)`, color: "#D1D5DB", size: "xs", margin: "sm" },
+        ],
+      },
+      body: {
+        type: "box", layout: "vertical", paddingAll: "16px",
+        contents: rows.length
+          ? [{ type: "text", text: "สมาชิก (กด เตะ เพื่อลบออก)", size: "xs", color: "#666666" }, ...rows]
+          : [{ type: "text", text: "ยังไม่มีสมาชิกอื่น", size: "sm", color: "#888888" }],
+      },
+      footer: {
+        type: "box", layout: "vertical", spacing: "sm",
+        contents: [btn("⚡ สรุปเลย", "สรุป", true), btn("📋 รายการของฉัน", "ดู"), btn("📖 การ์ดวิธีใช้ (ของผู้ใช้)", "วิธีใช้")],
+      },
+    },
+  }];
+}
+
 const adminId = (env) => env.LINE_USER_ID.trim();
 const isAdmin = (env, id) => id === adminId(env);
 
@@ -236,6 +279,9 @@ async function handleCommand(env, ctx, ev, uid) {
 
   if (cmd === "วิธีใช้" || cmd === "เมนู" || cmd === "help") {
     return line(env, "reply", { replyToken: ev.replyToken, messages: welcomeCard() });
+  }
+  if (admin && (cmd === "แอดมิน" || cmd === "admin")) {
+    return line(env, "reply", { replyToken: ev.replyToken, messages: await adminCard(env) });
   }
   if (admin && cmd === "คนใช้") {
     const members = await getMembers(env);
