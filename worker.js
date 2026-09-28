@@ -107,7 +107,7 @@ async function line(env, path, body) {
 const text = (t) => [{ type: "text", text: t.slice(0, 5000) }];
 
 // cache lets one cron run share fetches between users who follow the same stock/topic
-async function pushSummary(env, userId, cache = new Map()) {
+async function pushSummary(env, userId, cache = new Map(), skipEmpty = false) {
   const memo = (key, fn) => {
     if (!cache.has(key)) cache.set(key, fn());
     return cache.get(key);
@@ -115,6 +115,7 @@ async function pushSummary(env, userId, cache = new Map()) {
   const push = (t) => line(env, "push", { to: userId, messages: text(t) });
   const u = await getUser(env, userId);
   if (!u || (!u.stocks.length && !u.topics.length)) {
+    if (skipEmpty) return;
     return push("ยังไม่มีหุ้นหรือหัวข้อ พิมพ์ เพิ่ม AAPL หรือ หัวข้อ+ nuclear energy");
   }
   const topicParts = await Promise.all(
@@ -220,13 +221,15 @@ async function handleCommand(env, ctx, ev, uid) {
 }
 
 export default {
-  async scheduled(_event, env, ctx) {
+  async scheduled(event, env, ctx) {
+    // People with empty lists only get the reminder on the morning run (03:00 UTC = 10:00 BKK)
+    const skipEmpty = event.cron !== "0 3 * * *";
     ctx.waitUntil(
       (async () => {
         const cache = new Map();
         for (const id of await recipients(env)) {
           try {
-            await pushSummary(env, id, cache);
+            await pushSummary(env, id, cache, skipEmpty);
           } catch (e) {
             console.log("push failed", String(e));
           }
