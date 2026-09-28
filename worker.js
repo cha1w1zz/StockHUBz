@@ -162,6 +162,7 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
       if (i) await new Promise((r) => setTimeout(r, 400 * i));
       const res = await fetch(`https://news.google.com/rss/search?q=${q}+when:${win}&hl=en-US&gl=US&ceid=US:en`, {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
+        signal: AbortSignal.timeout(6000),
       });
       if (!res.ok) continue;
       const xml = await res.text();
@@ -178,6 +179,7 @@ async function fetchPrice(ticker) {
   try {
     const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d`, {
       headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) return "ไม่มีข้อมูลราคา";
     const j = await res.json();
@@ -200,6 +202,7 @@ async function searchSymbols(q) {
   try {
     const res = await fetch(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0&listsCount=0`, {
       headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) return null;
     const j = await res.json();
@@ -398,7 +401,13 @@ async function handleCommand(env, ctx, ev, uid) {
     }
     await env.KV.put("cd:" + uid, "1", { expirationTtl: 60 });
     await reply("⏳ กำลังสรุป รอสักครู่");
-    ctx.waitUntil(pushSummary(env, uid));
+    // waitUntil is killed silently at ~30s, so cap the whole job and tell the user instead of going quiet
+    const TIMED_OUT = Symbol();
+    ctx.waitUntil(
+      Promise.race([pushSummary(env, uid), new Promise((r) => setTimeout(() => r(TIMED_OUT), 26000))]).then((x) =>
+        x === TIMED_OUT ? line(env, "push", { to: uid, messages: text("⚠️ สรุปไม่ทัน (ช้าเกิน) ลองกดใหม่อีกครั้ง") }) : undefined
+      )
+    );
     return;
   }
 
