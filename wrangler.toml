@@ -1,0 +1,12 @@
+name = "stock-news-line"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# UTC. 12:30 = 19:30 Bangkok (before US open), 22:00 = 05:00 Bangkok (after US close)
+[triggers]
+crons = ["30 12 * * *", "0 22 * * *"]
+
+# id is filled in after `wrangler kv namespace create KV`
+[[kv_namespaces]]
+binding = "KV"
+id = "42958c2b4eda4c638af004c95fa7c29a"
