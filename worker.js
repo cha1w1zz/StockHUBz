@@ -10,11 +10,6 @@ const MAX_TOPICS_USER = 2;
 const NEWS_PER_TOPIC = 5;
 const MAX_USERS = 10; // including the admin
 
-const LINE_STYLE =
-  "\nจัดรูปแบบสำหรับแชท LINE: ห้ามใช้ markdown (ห้าม * # **) ใช้ • แทน bullet " +
-  "ขึ้นต้นแต่ละหุ้นด้วย 📌 ชื่อหุ้น และราคา ใส่ 🟢 บวก 🔴 ลบ ⚪ กลาง หน้าผลกระทบ เว้นบรรทัดระหว่างหุ้น\n";
-
-
 // Design tokens (accessible contrast; min text 12px, tap targets >= 44px)
 const GREEN = "#08784B";
 const INK = "#1F2937";
@@ -215,18 +210,31 @@ async function summarize(env, data) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
   const dd = `${String(now.getUTCDate()).padStart(2, "0")}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${now.getUTCFullYear() + 543}`;
   const prompt =
-    `วันนี้ ${dd} (พ.ศ.) สรุปข่าวต่อไปนี้เป็นไทย สั้นมาก:\n` +
-    "1) ทีละหัวข้อ (ส่วน ## หัวข้อ:) สรุปข่าวเด่น 2-3 ข้อ\n" +
-    "2) ทีละหุ้น เรียงบรรทัดตามนี้: ราคาวันนี้ · แนวโน้ม 5 วัน + ตำแหน่งเทียบช่วง 52 สัปดาห์ (ใช้ตัวเลขที่ให้เท่านั้น) · ข่าวเด่น 1 ข้อ + ผลกระทบ บวก/ลบ/กลาง · " +
-    "อารมณ์ข่าว: นับพาดหัวที่ให้ว่า บวก/ลบ/กลาง อย่างละกี่ข้อ (นับจริง ห้ามเดา) · จับตา: ความเสี่ยงหรือสิ่งที่ควรติดตาม 1 ข้อ อ้างจากพาดหัวที่ให้เท่านั้น ถ้าไม่มีให้เขียนว่า ไม่มีข้อมูลเพิ่มเติม\n" +
-    "ห้ามแนะนำซื้อขาย ข้อมูลไม่พอให้บอกตรงๆ ห้ามเดา\n" + LINE_STYLE + "\n" + data;
+    `วันนี้ ${dd} (พ.ศ.) คุณคือผู้สรุปข่าวหุ้นภาษาไทย\n` +
+    "กฎสำคัญ:\n" +
+    "- แปลพาดหัวข่าวเป็นภาษาไทยทุกข้อ ห้ามคัดลอกประโยคภาษาอังกฤษ (ยกเว้นชื่อบริษัท ตัวย่อหุ้น และศัพท์เฉพาะ เช่น AI, GPU)\n" +
+    "- ทุกหุ้นต้องมีครบทั้ง 4 บรรทัดตามแบบด้านล่าง ห้ามข้ามบรรทัดไหนเด็ดขาด โดยเฉพาะ 'จับตา'\n" +
+    "- ใช้เฉพาะตัวเลขและพาดหัวที่ให้มา ห้ามเดา ห้ามแนะนำซื้อขาย ข้อมูลไม่พอให้เขียนว่า ไม่มีข้อมูลเพิ่มเติม\n" +
+    "- กระชับ แต่ห้ามตัดบรรทัด\n\n" +
+    "แบบสำหรับส่วน '## หัวข้อ:' (ทีละหัวข้อ):\n" +
+    "📰 ชื่อหัวข้อ\n• ข่าวเด่น 2-3 ข้อ แปลเป็นไทย\n\n" +
+    "แบบสำหรับแต่ละหุ้น (ทำให้ครบทุกตัว):\n" +
+    "📌 ตัวย่อหุ้น · ราคาปิด (±% จากวันก่อน)\n" +
+    "• แนวโน้ม: 5 วัน ±% · ตำแหน่งเทียบช่วง 52 สัปดาห์ (จากตัวเลขที่ให้)\n" +
+    "• ข่าวเด่น: (แปลไทย 1 ข้อ) แล้วตามด้วย 🟢 บวก / 🔴 ลบ / ⚪ กลาง\n" +
+    "• อารมณ์ข่าว: บวก X / ลบ Y / กลาง Z (นับจากพาดหัวที่ให้ นับจริง)\n" +
+    "• จับตา: ความเสี่ยงหรือสิ่งที่ควรติดตาม 1 ข้อ อ้างจากพาดหัวที่ให้ (ถ้าไม่มีเขียนว่า ไม่มีข้อมูลเพิ่มเติม)\n\n" +
+    "ไม่ใช้ markdown (ห้าม * # **) เว้นบรรทัดระหว่างหุ้น\n\n" + data;
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY.trim()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 1300 }),
+    body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 2000, temperature: 0.2 }),
   });
   if (!r.ok) throw new Error(`OpenRouter ${r.status}: ${(await r.text()).slice(0, 300)}`);
-  return (await r.json()).choices[0].message.content;
+  const j = await r.json();
+  const choice = j.choices[0];
+  const out = choice.message.content;
+  return choice.finish_reason === "length" ? out + "\n\n(สรุปยาวเกินจึงถูกตัดท้าย ลดจำนวนหุ้นหรือหัวข้อได้)" : out;
 }
 
 async function line(env, path, body) {
