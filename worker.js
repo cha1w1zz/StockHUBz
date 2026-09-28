@@ -154,18 +154,23 @@ async function recipients(env) {
 }
 
 async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STOCK) {
-  try {
-    const q = encodeURIComponent(query);
-    const res = await fetch(`https://news.google.com/rss/search?q=${q}+when:2d&hl=en-US&gl=US&ceid=US:en`);
-    if (!res.ok) return [];
-    const xml = await res.text();
-    const titles = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].map((m) =>
-      m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()
-    );
-    return titles.slice(0, limit).map((t) => `- ${t}`);
-  } catch {
-    return [];
+  const q = encodeURIComponent(query);
+  // Google sometimes returns empty/blocked when many requests fire at once, so retry and widen the window
+  for (const [i, win] of ["2d", "2d", "7d"].entries()) {
+    try {
+      if (i) await new Promise((r) => setTimeout(r, 400 * i));
+      const res = await fetch(`https://news.google.com/rss/search?q=${q}+when:${win}&hl=en-US&gl=US&ceid=US:en`, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
+      });
+      if (!res.ok) continue;
+      const xml = await res.text();
+      const titles = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].map((m) =>
+        m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()
+      );
+      if (titles.length) return titles.slice(0, limit).map((t) => `- ${t}`);
+    } catch {}
   }
+  return [];
 }
 
 async function fetchPrice(ticker) {
@@ -263,12 +268,12 @@ async function pushSummary(env, userId, cache = new Map(), skipEmpty = false, sl
     return line(env, "push", { to: userId, messages: menuCard(u || { stocks: [], topics: [] }, { admin: isAdmin(env, userId) }) });
   }
   const topicParts = await Promise.all(
-    u.topics.map(async (t) => `## หัวข้อ: ${t}\n${(await memo("t:" + t, () => fetchNews("", `${t} news`, NEWS_PER_TOPIC))).join("\n")}`)
+    u.topics.map(async (t) => `## หัวข้อ: ${t}\n${(await memo("t:" + t, () => fetchNews("", `${t} news`, NEWS_PER_TOPIC))).join("\n") || "(ดึงข่าวไม่ได้ตอนนี้ ให้เขียนว่า ไม่มีข่าวใหม่)"}`)
   );
   const parts = await Promise.all(
     u.stocks.map(async (s) => {
       const [price, news] = await Promise.all([memo("p:" + s, () => fetchPrice(s)), memo("s:" + s, () => fetchNews(s))]);
-      return `## ${s}\nราคา: ${price}\nข่าว:\n${news.join("\n")}`;
+      return `## ${s}\nราคา: ${price}\nข่าว:\n${news.join("\n") || "(ดึงข่าวไม่ได้ตอนนี้ ให้เขียนว่า ไม่มีข่าวใหม่)"}`;
     })
   );
   let summary;
