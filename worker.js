@@ -5,7 +5,8 @@ const DEFAULT_STOCKS = ["NVDA", "MSFT", "GOOGL", "AMD", "PLTR"]; // AI theme
 const MAX_STOCKS_ADMIN = 10;
 const MAX_STOCKS_USER = 5;
 const DEFAULT_TOPICS = ["artificial intelligence AI industry"];
-const MAX_TOPICS = 3;
+const MAX_TOPICS_ADMIN = 3;
+const MAX_TOPICS_USER = 2;
 const NEWS_PER_TOPIC = 5;
 const MAX_USERS = 10; // including the admin
 
@@ -211,7 +212,8 @@ async function handleCommand(env, ctx, ev, uid) {
     if (!t || t.length > 60) return reply("พิมพ์ เช่น หัวข้อ+ nuclear energy (ไม่เกิน 60 ตัวอักษร)");
     if (cmd === "หัวข้อ+") {
       if (me.topics.includes(t)) return reply(`มีหัวข้อ "${t}" อยู่แล้ว`);
-      if (me.topics.length >= MAX_TOPICS) return reply(`เต็มแล้ว (สูงสุด ${MAX_TOPICS} หัวข้อ) ลบก่อนด้วย หัวข้อ- ชื่อ`);
+      const maxTopics = admin ? MAX_TOPICS_ADMIN : MAX_TOPICS_USER;
+      if (me.topics.length >= maxTopics) return reply(`เต็มแล้ว (สูงสุด ${maxTopics} หัวข้อ) ลบก่อนด้วย หัวข้อ- ชื่อ`);
       await saveUser(env, uid, { ...me, topics: [...me.topics, t] });
       return reply(`✅ เพิ่มหัวข้อ "${t}" แล้ว`);
     }
