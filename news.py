@@ -20,7 +20,8 @@ BKK = timezone(timedelta(hours=7))
 def env(name):
     """Read from environment (GitHub Secrets) first, then local .env."""
     if os.environ.get(name, "").strip():
-        return os.environ[name].strip().strip('"')
+        val = os.environ[name].strip().strip('"')
+        return val.split("=", 1)[1].strip() if val.startswith(name + "=") else val
     f = HERE / ".env"
     for line in f.read_text(encoding="utf-8").splitlines() if f.exists() else []:
         if line.startswith(name + "="):
@@ -85,6 +86,7 @@ def main():
         news = fetch_news(s["query"], cfg["news_per_stock"])
         parts.append(f"## {s['name']}\nราคา: {fetch_price(s['ticker'])}\nข่าว:\n" + "\n".join(news))
     key = env("OPENROUTER_API_KEY") or sys.exit("OPENROUTER_API_KEY missing")
+    print(f"key check: starts with {key[:6]!r}, length {len(key)}")  # shape only, never the key
     line_token, line_user = env("LINE_TOKEN"), env("LINE_USER_ID")
     summary = summarize(key, cfg["model"], "\n\n".join(parts), LINE_STYLE if line_token else "")
 
