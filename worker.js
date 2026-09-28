@@ -16,6 +16,56 @@ const LINE_STYLE =
   "\nจัดรูปแบบสำหรับแชท LINE: ห้ามใช้ markdown (ห้าม * # **) ใช้ • แทน bullet " +
   "ขึ้นต้นแต่ละหุ้นด้วย 📌 ชื่อหุ้น และราคา ใส่ 🟢 บวก 🔴 ลบ ⚪ กลาง หน้าผลกระทบ เว้นบรรทัดระหว่างหุ้น\n";
 
+
+// Welcome / how-to card (Flex Message). Buttons send the command as if the user typed it.
+const GREEN = "#0B8F5A";
+const step = (n, title, desc) => ({
+  type: "box", layout: "horizontal", spacing: "md", margin: "lg",
+  contents: [
+    { type: "box", layout: "vertical", width: "26px", height: "26px", cornerRadius: "13px", backgroundColor: GREEN, justifyContent: "center", alignItems: "center",
+      contents: [{ type: "text", text: String(n), color: "#FFFFFF", size: "sm", weight: "bold", align: "center" }] },
+    { type: "box", layout: "vertical", flex: 1, spacing: "xs", contents: [
+      { type: "text", text: title, weight: "bold", size: "sm", wrap: true },
+      { type: "text", text: desc, size: "xs", color: "#666666", wrap: true },
+    ] },
+  ],
+});
+const btn = (label, msg, primary = false) => ({
+  type: "button", height: "sm", style: primary ? "primary" : "secondary", color: primary ? GREEN : undefined,
+  action: { type: "message", label, text: msg },
+});
+
+function welcomeCard(isNew = false) {
+  return [{
+    type: "flex",
+    altText: "วิธีใช้ MARKII: พิมพ์ เพิ่ม NVDA เพื่อเริ่มติดตามหุ้น แล้วพิมพ์ สรุป",
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box", layout: "vertical", backgroundColor: GREEN, paddingAll: "16px",
+        contents: [
+          { type: "text", text: "📈 MARKII", color: "#FFFFFF", weight: "bold", size: "xl" },
+          { type: "text", text: isNew ? "ลงทะเบียนให้แล้ว เริ่มได้เลย" : "สรุปข่าวหุ้น + หัวข้อที่คุณสนใจ", color: "#D6F5E8", size: "xs", margin: "sm" },
+        ],
+      },
+      body: {
+        type: "box", layout: "vertical", paddingAll: "16px",
+        contents: [
+          step(1, "เพิ่มหุ้น (สูงสุด 5 ตัว)", "พิมพ์ เพิ่ม NVDA หรือ เพิ่ม AAPL"),
+          step(2, "เพิ่มหัวข้อข่าว (สูงสุด 2)", "พิมพ์ หัวข้อ+ nuclear energy (ภาษาอังกฤษแม่นกว่า)"),
+          step(3, "ขอสรุปทันที", "พิมพ์ สรุป หรือรอรับอัตโนมัติ 10:00 และ 19:30"),
+          { type: "separator", margin: "lg" },
+          { type: "text", text: "ลบ: ลบ NVDA · หัวข้อ- ชื่อ\nดูรายการ: ดู · ดูหัวข้อ\nเลือกรอบ: รอบ 1 เช้า / รอบ 1 เย็น / รอบ 2", size: "xxs", color: "#888888", wrap: true, margin: "md" },
+        ],
+      },
+      footer: {
+        type: "box", layout: "vertical", spacing: "sm",
+        contents: [btn("➕ เพิ่ม NVDA", "เพิ่ม NVDA", true), btn("📋 ดูรายการของฉัน", "ดู"), btn("⚡ สรุปเลย", "สรุป")],
+      },
+    },
+  }];
+}
+
 const adminId = (env) => env.LINE_USER_ID.trim();
 const isAdmin = (env, id) => id === adminId(env);
 
@@ -126,7 +176,7 @@ async function pushSummary(env, userId, cache = new Map(), skipEmpty = false, sl
   if (slot && u && u.rounds && u.rounds !== "both" && u.rounds !== slot) return;
   if (!u || (!u.stocks.length && !u.topics.length)) {
     if (skipEmpty) return;
-    return push("ยังไม่มีหุ้นหรือหัวข้อ พิมพ์ เพิ่ม AAPL หรือ หัวข้อ+ nuclear energy");
+    return line(env, "push", { to: userId, messages: welcomeCard() });
   }
   const topicParts = await Promise.all(
     u.topics.map(async (t) => `## หัวข้อ: ${t}\n${(await memo("t:" + t, () => fetchNews("", `${t} news`, NEWS_PER_TOPIC))).join("\n")}`)
@@ -155,6 +205,16 @@ async function validSignature(env, body, sig) {
   return btoa(String.fromCharCode(...new Uint8Array(mac))) === sig;
 }
 
+async function handleFollow(env, ev, uid) {
+  const reply = (m) => line(env, "reply", { replyToken: ev.replyToken, messages: m });
+  if (await getUser(env, uid)) return reply(welcomeCard());
+  const members = await getMembers(env);
+  if (members.length + 1 >= MAX_USERS) return reply(text("ขออภัย ตอนนี้ผู้ใช้เต็มแล้ว"));
+  await env.KV.put("members", JSON.stringify([...members, uid]));
+  await saveUser(env, uid, { stocks: [], topics: [] });
+  return reply(welcomeCard(true));
+}
+
 async function handleCommand(env, ctx, ev, uid) {
   const msg = (ev.message.text || "").trim();
   const [cmd, arg] = msg.split(/\s+/);
@@ -171,9 +231,12 @@ async function handleCommand(env, ctx, ev, uid) {
     await env.KV.put("members", JSON.stringify([...members, uid]));
     me = { stocks: [], topics: [] };
     await saveUser(env, uid, me);
-    return reply(`👋 ยินดีต้อนรับ ลงทะเบียนให้แล้ว\n${HELP}`);
+    return line(env, "reply", { replyToken: ev.replyToken, messages: welcomeCard(true) });
   }
 
+  if (cmd === "วิธีใช้" || cmd === "เมนู" || cmd === "help") {
+    return line(env, "reply", { replyToken: ev.replyToken, messages: welcomeCard() });
+  }
   if (admin && cmd === "คนใช้") {
     const members = await getMembers(env);
     const lines = members.map((m, i) => `${i + 1}. ...${m.slice(-6)}`);
@@ -235,7 +298,7 @@ async function handleCommand(env, ctx, ev, uid) {
     await saveUser(env, uid, { ...me, stocks: me.stocks.filter((x) => x !== ticker) });
     return reply(`✅ ลบ ${ticker} แล้ว`);
   }
-  return reply(HELP);
+  return line(env, "reply", { replyToken: ev.replyToken, messages: welcomeCard() });
 }
 
 export default {
@@ -265,6 +328,10 @@ export default {
       return new Response("bad signature", { status: 401 });
     }
     for (const ev of JSON.parse(body).events || []) {
+      if (ev.type === "follow" && ev.source?.userId && !ev.deliveryContext?.isRedelivery) {
+        ctx.waitUntil(handleFollow(env, ev, ev.source.userId));
+        continue;
+      }
       if (ev.type === "message" && ev.message?.type === "text" && ev.source?.userId && !ev.deliveryContext?.isRedelivery) {
         ctx.waitUntil(handleCommand(env, ctx, ev, ev.source.userId));
       }
