@@ -1,3 +1,4 @@
 requests
 yfinance
 streamlit
+streamlit-local-storage
