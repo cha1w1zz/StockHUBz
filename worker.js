@@ -231,6 +231,7 @@ async function summarize(env, data) {
     method: "POST",
     headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY.trim()}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 4000, temperature: 0.2 }),
+    signal: AbortSignal.timeout(25000), // waitUntil dies at ~30s; fail loudly ("สรุปไม่สำเร็จ") before that instead of silence
   });
   if (!r.ok) throw new Error(`OpenRouter ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const j = await r.json();
