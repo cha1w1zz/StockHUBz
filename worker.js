@@ -152,19 +152,16 @@ async function handleCommand(env, ctx, ev, uid) {
   const reply = (t) => line(env, "reply", { replyToken: ev.replyToken, messages: text(t) });
   const admin = isAdmin(env, uid);
 
-  // Joining: wrong or missing code stays silent so strangers learn nothing
-  if (cmd === "เข้าร่วม") {
-    if (!env.JOIN_CODE || rest !== env.JOIN_CODE.trim()) return;
+  // Open join: anyone who messages the bot is registered, up to MAX_USERS
+  let me = await getUser(env, uid);
+  if (!me) {
     const members = await getMembers(env);
-    if (admin || members.includes(uid)) return reply("คุณเข้าร่วมอยู่แล้ว");
-    if (members.length + 1 >= MAX_USERS) return reply("ขออภัย เต็มแล้ว");
+    if (members.length + 1 >= MAX_USERS) return reply("ขออภัย ตอนนี้ผู้ใช้เต็มแล้ว");
     await env.KV.put("members", JSON.stringify([...members, uid]));
-    await saveUser(env, uid, { stocks: [], topics: [] });
-    return reply(`✅ เข้าร่วมแล้ว\n${HELP}`);
+    me = { stocks: [], topics: [] };
+    await saveUser(env, uid, me);
+    return reply(`👋 ยินดีต้อนรับ ลงทะเบียนให้แล้ว\n${HELP}`);
   }
-
-  const me = await getUser(env, uid);
-  if (!me) return; // not a member: ignore
 
   if (admin && cmd === "คนใช้") {
     const members = await getMembers(env);
