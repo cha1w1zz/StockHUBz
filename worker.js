@@ -3,6 +3,9 @@ const MODEL = "google/gemini-2.5-flash-lite";
 const NEWS_PER_STOCK = 4;
 const DEFAULT_STOCKS = ["NVDA", "MSFT", "GOOGL", "AMD", "PLTR"]; // AI theme
 const MAX_STOCKS = 10;
+const DEFAULT_TOPICS = ["artificial intelligence AI industry"];
+const MAX_TOPICS = 3;
+const NEWS_PER_TOPIC = 5;
 
 const LINE_STYLE =
   "\nจัดรูปแบบสำหรับแชท LINE: ห้ามใช้ markdown (ห้าม * # **) ใช้ • แทน bullet " +
@@ -12,6 +15,13 @@ async function getStocks(env) {
   const raw = await env.KV.get("stocks");
   return raw ? JSON.parse(raw) : DEFAULT_STOCKS;
 }
+
+async function getTopics(env) {
+  const raw = await env.KV.get("topics");
+  return raw ? JSON.parse(raw) : DEFAULT_TOPICS;
+}
+
+const saveTopics = (env, list) => env.KV.put("topics", JSON.stringify(list));
 
 const saveStocks = (env, list) => env.KV.put("stocks", JSON.stringify(list));
 
@@ -41,8 +51,8 @@ async function summarize(env, data) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
   const dd = `${String(now.getUTCDate()).padStart(2, "0")}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${now.getUTCFullYear() + 543}`;
   const prompt =
-    `วันนี้ ${dd} (พ.ศ.) ธีม: AI. สรุปข่าวต่อไปนี้เป็นไทย สั้นมาก:\n` +
-    "1) หัวข้อ 'ข่าววงการ AI' 3 ข้อ\n2) ทีละหุ้น: ราคา + ข่าวเด่น 1 ข้อ + ผลกระทบ บวก/ลบ/กลาง\n" +
+    `วันนี้ ${dd} (พ.ศ.) สรุปข่าวต่อไปนี้เป็นไทย สั้นมาก:\n` +
+    "1) ทีละหัวข้อ (ส่วน ## หัวข้อ:) สรุปข่าวเด่น 2-3 ข้อ\n2) ทีละหุ้น: ราคา + ข่าวเด่น 1 ข้อ + ผลกระทบ บวก/ลบ/กลาง\n" +
     "ห้ามแนะนำซื้อขาย ข้อมูลไม่พอให้บอกตรงๆ ห้ามเดา\n" + LINE_STYLE + "\n" + data;
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -66,17 +76,20 @@ const text = (t) => [{ type: "text", text: t.slice(0, 5000) }];
 
 async function pushSummary(env) {
   const stocks = await getStocks(env);
-  if (!stocks.length) return line(env, "push", { to: env.LINE_USER_ID.trim(), messages: text("รายการหุ้นว่าง พิมพ์ เพิ่ม AAPL") });
-  const ai = (await fetchNews("", "artificial intelligence AI industry news", 5)).join("\n");
+  const topics = await getTopics(env);
+  if (!stocks.length && !topics.length) return line(env, "push", { to: env.LINE_USER_ID.trim(), messages: text("ไม่มีหุ้นและหัวข้อ พิมพ์ เพิ่ม AAPL หรือ หัวข้อ+ nuclear energy") });
+  const topicParts = await Promise.all(
+    topics.map(async (t) => `## หัวข้อ: ${t}\n${(await fetchNews("", `${t} news`, NEWS_PER_TOPIC)).join("\n")}`)
+  );
   const parts = await Promise.all(
     stocks.map(async (s) => `## ${s}\nราคา: ${await fetchPrice(s)}\nข่าว:\n${(await fetchNews(s)).join("\n")}`)
   );
-  const summary = await summarize(env, `## ข่าววงการ AI\n${ai}\n\n` + parts.join("\n\n"));
+  const summary = await summarize(env, [...topicParts, ...parts].join("\n\n"));
   const now = new Date(Date.now() + 7 * 3600 * 1000);
   const stamp = `${String(now.getUTCDate()).padStart(2, "0")}/${String(now.getUTCMonth() + 1).padStart(2, "0")} ${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
   await line(env, "push", {
     to: env.LINE_USER_ID.trim(),
-    messages: text(`📈 สรุปข่าว AI + หุ้น ${stamp}\n\n${summary}\n\n(ไม่ใช่คำแนะนำการลงทุน)`),
+    messages: text(`📈 สรุปข่าว ${stamp}\n\n${summary}\n\n(ไม่ใช่คำแนะนำการลงทุน)`),
   });
 }
 
@@ -89,10 +102,29 @@ async function validSignature(env, body, sig) {
 async function handleCommand(env, ctx, ev) {
   const msg = (ev.message.text || "").trim();
   const [cmd, arg] = msg.split(/\s+/);
+  const rest = msg.slice((cmd || "").length).trim().replace(/\s+/g, " ");
   const ticker = (arg || "").toUpperCase();
   const reply = (t) => line(env, "reply", { replyToken: ev.replyToken, messages: text(t) });
   const list = await getStocks(env);
 
+  if (cmd === "ดูหัวข้อ") {
+    const t = await getTopics(env);
+    return reply(`หัวข้อ: ${t.join(", ") || "(ว่าง)"}`);
+  }
+  if (cmd === "หัวข้อ+" || cmd === "หัวข้อ-") {
+    const topics = await getTopics(env);
+    const t = rest.toLowerCase();
+    if (!t || t.length > 60) return reply("พิมพ์ เช่น หัวข้อ+ nuclear energy (ไม่เกิน 60 ตัวอักษร)");
+    if (cmd === "หัวข้อ+") {
+      if (topics.includes(t)) return reply(`มีหัวข้อ "${t}" อยู่แล้ว`);
+      if (topics.length >= MAX_TOPICS) return reply(`เต็มแล้ว (สูงสุด ${MAX_TOPICS} หัวข้อ) ลบก่อนด้วย หัวข้อ- ชื่อ`);
+      await saveTopics(env, [...topics, t]);
+      return reply(`✅ เพิ่มหัวข้อ "${t}" แล้ว`);
+    }
+    if (!topics.includes(t)) return reply(`ไม่มีหัวข้อ "${t}" (ดูด้วย ดูหัวข้อ)`);
+    await saveTopics(env, topics.filter((x) => x !== t));
+    return reply(`✅ ลบหัวข้อ "${t}" แล้ว`);
+  }
   if (cmd === "ดู") return reply(`รายการหุ้น: ${list.join(", ") || "(ว่าง)"}`);
   if (cmd === "สรุป") {
     await reply("⏳ กำลังสรุป รอสักครู่");
@@ -111,7 +143,7 @@ async function handleCommand(env, ctx, ev) {
     await saveStocks(env, list.filter((s) => s !== ticker));
     return reply(`✅ ลบ ${ticker} แล้ว`);
   }
-  return reply("คำสั่ง: เพิ่ม AAPL · ลบ AAPL · ดู · สรุป");
+  return reply("คำสั่ง: เพิ่ม AAPL · ลบ AAPL · ดู · หัวข้อ+ ชื่อ · หัวข้อ- ชื่อ · ดูหัวข้อ · สรุป");
 }
 
 export default {
