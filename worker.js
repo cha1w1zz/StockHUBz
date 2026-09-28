@@ -154,7 +154,7 @@ async function recipients(env) {
   return [adminId(env), ...members.filter((m) => m !== adminId(env))];
 }
 
-const CLICKBAIT = /^(why|here'?s why|what'?s (going on|happening|behind))\b|should you (buy|sell)|is .{0,40} a (buy|sell)\b|\b(stock|shares)\b.*\b(down|falling|falls|dropping|drops|plunging|sinking|slumping|soaring|jumping)\b.*\btoday\b/i;
+const CLICKBAIT = /^(why|here'?s why|what'?s (going on|happening|behind))\b|\?|what (happened|to know)|\bexplained\b|here'?s what|should you (buy|sell)|is .{0,40} a (buy|sell)\b|\b(stock|shares)\b.*\b(down|falling|falls|dropping|drops|plunging|sinking|sinks|sliding|slumping|tumbling|soaring|jumping)\b.*\btoday\b/i;
 
 async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STOCK) {
   const q = encodeURIComponent(query);
@@ -229,7 +229,7 @@ async function summarize(env, data) {
     "- ทุกหุ้นต้องมีครบทั้ง 4 บรรทัดตามแบบด้านล่าง ห้ามข้ามบรรทัดไหนเด็ดขาด โดยเฉพาะ 'จับตา'\n" +
     "- ใช้เฉพาะตัวเลขและพาดหัวที่ให้มา ห้ามเดา ห้ามแนะนำซื้อขาย ข้อมูลไม่พอให้เขียนว่า ไม่มีข้อมูลเพิ่มเติม\n" +
     "- ถ้ามีพาดหัวเรื่องเดียวกันซ้ำหลายสำนัก อย่าเล่าซ้ำ แต่ยังต้องเขียนข่าวเด่นและสรุปให้ครบเท่าเดิม ห้ามย่อหรือตัดเนื้อหาเพราะเรื่องซ้ำ\n" +
-    "- เลือกข่าวที่มีเหตุการณ์จริง (งบ ดีล กฎระเบียบ ผลิตภัณฑ์ ตัวเลขเศรษฐกิจ) พาดหัวเรียกคลิกที่แค่ถามว่าทำไมหุ้นขึ้น/ร่วงโดยไม่มีเนื้อหา ให้ข้าม ถ้าไม่มีข่าวเนื้อๆ เลยให้เขียนว่า ไม่มีข่าวเด่นใหม่ ห้ามตัดบรรทัดทิ้ง\n" +
+    "- เลือกข่าวที่มีเหตุการณ์จริง (งบ ดีล กฎระเบียบ ผลิตภัณฑ์ ตัวเลขเศรษฐกิจ) พาดหัวเรียกคลิกที่ถามว่าทำไมหุ้นขึ้น/ร่วง หรือ 'เกิดอะไรขึ้น' ให้ข้าม ห้ามเขียนข่าวเด่นที่แค่บอกว่าหุ้นขึ้น/ร่วง หรืออธิบายสาเหตุราคาเอง (ราคาใช้เฉพาะบรรทัดราคาและแนวโน้ม) ถ้าไม่มีข่าวเนื้อๆ เลยให้เขียนว่า ไม่มีข่าวเด่นใหม่ ห้ามตัดบรรทัดทิ้ง\n" +
     "- กระชับ แต่ห้ามตัดบรรทัด\n\n" +
     "แบบสำหรับส่วน '## หัวข้อ:' (ทีละหัวข้อ):\n" +
     "📰 ชื่อหัวข้อ\n• ข่าวเด่น 3-4 ข้อ แปลเป็นไทย\n\n" +
