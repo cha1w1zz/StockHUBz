@@ -1,7 +1,7 @@
 // Cloudflare Worker: US stock news -> LINE. Cron push + LINE chat commands (owner only).
 const MODEL = "google/gemini-2.5-flash-lite";
 const NEWS_PER_STOCK = 4;
-const DEFAULT_STOCKS = ["NVDA", "MSFT", "GOOGL", "AMD", "PLTR"]  // AI theme;
+const DEFAULT_STOCKS = ["NVDA", "MSFT", "GOOGL", "AMD", "PLTR"]; // AI theme
 const MAX_STOCKS = 10;
 
 const LINE_STYLE =
