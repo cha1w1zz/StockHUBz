@@ -2,49 +2,81 @@
 const MODEL = "google/gemini-2.5-flash-lite";
 const NEWS_PER_STOCK = 4;
 const DEFAULT_STOCKS = ["NVDA", "MSFT", "GOOGL", "AMD", "PLTR"]; // AI theme
-const MAX_STOCKS = 10;
+const MAX_STOCKS_ADMIN = 10;
+const MAX_STOCKS_USER = 5;
 const DEFAULT_TOPICS = ["artificial intelligence AI industry"];
 const MAX_TOPICS = 3;
 const NEWS_PER_TOPIC = 5;
+const MAX_USERS = 10; // including the admin
+
+const HELP = "คำสั่ง: เพิ่ม AAPL · ลบ AAPL · ดู · หัวข้อ+ ชื่อ · หัวข้อ- ชื่อ · ดูหัวข้อ · สรุป";
 
 const LINE_STYLE =
   "\nจัดรูปแบบสำหรับแชท LINE: ห้ามใช้ markdown (ห้าม * # **) ใช้ • แทน bullet " +
   "ขึ้นต้นแต่ละหุ้นด้วย 📌 ชื่อหุ้น และราคา ใส่ 🟢 บวก 🔴 ลบ ⚪ กลาง หน้าผลกระทบ เว้นบรรทัดระหว่างหุ้น\n";
 
-async function getStocks(env) {
-  const raw = await env.KV.get("stocks");
-  return raw ? JSON.parse(raw) : DEFAULT_STOCKS;
+const adminId = (env) => env.LINE_USER_ID.trim();
+const isAdmin = (env, id) => id === adminId(env);
+
+async function kvJson(env, key, fallback) {
+  try {
+    const raw = await env.KV.get(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
-async function getTopics(env) {
-  const raw = await env.KV.get("topics");
-  return raw ? JSON.parse(raw) : DEFAULT_TOPICS;
+const getMembers = (env) => kvJson(env, "members", []);
+const saveUser = (env, id, u) => env.KV.put("u:" + id, JSON.stringify(u));
+
+// Per-user lists. The admin falls back to the old single-user keys so nothing is lost.
+async function getUser(env, id) {
+  const u = await kvJson(env, "u:" + id, null);
+  if (u) return u;
+  if (isAdmin(env, id)) {
+    return {
+      stocks: await kvJson(env, "stocks", DEFAULT_STOCKS),
+      topics: await kvJson(env, "topics", DEFAULT_TOPICS),
+    };
+  }
+  return null;
 }
 
-const saveTopics = (env, list) => env.KV.put("topics", JSON.stringify(list));
-
-const saveStocks = (env, list) => env.KV.put("stocks", JSON.stringify(list));
+async function recipients(env) {
+  const members = await getMembers(env);
+  return [adminId(env), ...members.filter((m) => m !== adminId(env))];
+}
 
 async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STOCK) {
-  const q = encodeURIComponent(query);
-  const res = await fetch(`https://news.google.com/rss/search?q=${q}+when:2d&hl=en-US&gl=US&ceid=US:en`);
-  const xml = await res.text();
-  const titles = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].map((m) =>
-    m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()
-  );
-  return titles.slice(0, limit).map((t) => `- ${t}`);
+  try {
+    const q = encodeURIComponent(query);
+    const res = await fetch(`https://news.google.com/rss/search?q=${q}+when:2d&hl=en-US&gl=US&ceid=US:en`);
+    if (!res.ok) return [];
+    const xml = await res.text();
+    const titles = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].map((m) =>
+      m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()
+    );
+    return titles.slice(0, limit).map((t) => `- ${t}`);
+  } catch {
+    return [];
+  }
 }
 
 async function fetchPrice(ticker) {
-  const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5d&interval=1d`, {
-    headers: { "User-Agent": "Mozilla/5.0" },
-  });
-  if (!res.ok) return "ไม่มีข้อมูลราคา";
-  const j = await res.json();
-  const closes = (j.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []).filter((x) => x != null);
-  if (closes.length < 2) return "ไม่มีข้อมูลราคา";
-  const last = closes.at(-1), prev = closes.at(-2);
-  return `ปิดล่าสุด ${last.toFixed(2)} ดอลลาร์ (${(((last - prev) / prev) * 100).toFixed(2)}% จากวันก่อน)`;
+  try {
+    const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5d&interval=1d`, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    if (!res.ok) return "ไม่มีข้อมูลราคา";
+    const j = await res.json();
+    const closes = (j.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []).filter((x) => x != null);
+    if (closes.length < 2) return "ไม่มีข้อมูลราคา";
+    const last = closes.at(-1), prev = closes.at(-2);
+    return `ปิดล่าสุด ${last.toFixed(2)} ดอลลาร์ (${(((last - prev) / prev) * 100).toFixed(2)}% จากวันก่อน)`;
+  } catch {
+    return "ไม่มีข้อมูลราคา";
+  }
 }
 
 async function summarize(env, data) {
@@ -74,23 +106,36 @@ async function line(env, path, body) {
 
 const text = (t) => [{ type: "text", text: t.slice(0, 5000) }];
 
-async function pushSummary(env) {
-  const stocks = await getStocks(env);
-  const topics = await getTopics(env);
-  if (!stocks.length && !topics.length) return line(env, "push", { to: env.LINE_USER_ID.trim(), messages: text("ไม่มีหุ้นและหัวข้อ พิมพ์ เพิ่ม AAPL หรือ หัวข้อ+ nuclear energy") });
+// cache lets one cron run share fetches between users who follow the same stock/topic
+async function pushSummary(env, userId, cache = new Map()) {
+  const memo = (key, fn) => {
+    if (!cache.has(key)) cache.set(key, fn());
+    return cache.get(key);
+  };
+  const push = (t) => line(env, "push", { to: userId, messages: text(t) });
+  const u = await getUser(env, userId);
+  if (!u || (!u.stocks.length && !u.topics.length)) {
+    return push("ยังไม่มีหุ้นหรือหัวข้อ พิมพ์ เพิ่ม AAPL หรือ หัวข้อ+ nuclear energy");
+  }
   const topicParts = await Promise.all(
-    topics.map(async (t) => `## หัวข้อ: ${t}\n${(await fetchNews("", `${t} news`, NEWS_PER_TOPIC)).join("\n")}`)
+    u.topics.map(async (t) => `## หัวข้อ: ${t}\n${(await memo("t:" + t, () => fetchNews("", `${t} news`, NEWS_PER_TOPIC))).join("\n")}`)
   );
   const parts = await Promise.all(
-    stocks.map(async (s) => `## ${s}\nราคา: ${await fetchPrice(s)}\nข่าว:\n${(await fetchNews(s)).join("\n")}`)
+    u.stocks.map(async (s) => {
+      const [price, news] = await Promise.all([memo("p:" + s, () => fetchPrice(s)), memo("s:" + s, () => fetchNews(s))]);
+      return `## ${s}\nราคา: ${price}\nข่าว:\n${news.join("\n")}`;
+    })
   );
-  const summary = await summarize(env, [...topicParts, ...parts].join("\n\n"));
+  let summary;
+  try {
+    summary = await summarize(env, [...topicParts, ...parts].join("\n\n"));
+  } catch (e) {
+    console.log("summarize failed", String(e));
+    return push("⚠️ สรุปไม่สำเร็จ ลองใหม่ภายหลัง");
+  }
   const now = new Date(Date.now() + 7 * 3600 * 1000);
   const stamp = `${String(now.getUTCDate()).padStart(2, "0")}/${String(now.getUTCMonth() + 1).padStart(2, "0")} ${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
-  await line(env, "push", {
-    to: env.LINE_USER_ID.trim(),
-    messages: text(`📈 สรุปข่าว ${stamp}\n\n${summary}\n\n(ไม่ใช่คำแนะนำการลงทุน)`),
-  });
+  await push(`📈 สรุปข่าว ${stamp}\n\n${summary}\n\n(ไม่ใช่คำแนะนำการลงทุน)`);
 }
 
 async function validSignature(env, body, sig) {
@@ -99,56 +144,98 @@ async function validSignature(env, body, sig) {
   return btoa(String.fromCharCode(...new Uint8Array(mac))) === sig;
 }
 
-async function handleCommand(env, ctx, ev) {
+async function handleCommand(env, ctx, ev, uid) {
   const msg = (ev.message.text || "").trim();
   const [cmd, arg] = msg.split(/\s+/);
   const rest = msg.slice((cmd || "").length).trim().replace(/\s+/g, " ");
   const ticker = (arg || "").toUpperCase();
   const reply = (t) => line(env, "reply", { replyToken: ev.replyToken, messages: text(t) });
-  const list = await getStocks(env);
+  const admin = isAdmin(env, uid);
 
-  if (cmd === "ดูหัวข้อ") {
-    const t = await getTopics(env);
-    return reply(`หัวข้อ: ${t.join(", ") || "(ว่าง)"}`);
+  // Joining: wrong or missing code stays silent so strangers learn nothing
+  if (cmd === "เข้าร่วม") {
+    if (!env.JOIN_CODE || rest !== env.JOIN_CODE.trim()) return;
+    const members = await getMembers(env);
+    if (admin || members.includes(uid)) return reply("คุณเข้าร่วมอยู่แล้ว");
+    if (members.length + 1 >= MAX_USERS) return reply("ขออภัย เต็มแล้ว");
+    await env.KV.put("members", JSON.stringify([...members, uid]));
+    await saveUser(env, uid, { stocks: [], topics: [] });
+    return reply(`✅ เข้าร่วมแล้ว\n${HELP}`);
   }
+
+  const me = await getUser(env, uid);
+  if (!me) return; // not a member: ignore
+
+  if (admin && cmd === "คนใช้") {
+    const members = await getMembers(env);
+    const lines = members.map((m, i) => `${i + 1}. ...${m.slice(-6)}`);
+    return reply(`ผู้ใช้ ${members.length + 1}/${MAX_USERS} (รวมแอดมิน)\n${lines.join("\n") || "(ยังไม่มีสมาชิกอื่น)"}`);
+  }
+  if (admin && cmd === "เตะ") {
+    const members = await getMembers(env);
+    const n = parseInt(arg, 10);
+    if (!(n >= 1 && n <= members.length)) return reply("พิมพ์ เตะ เลขลำดับ (ดูลำดับจาก คนใช้)");
+    const gone = members[n - 1];
+    await env.KV.put("members", JSON.stringify(members.filter((m) => m !== gone)));
+    await env.KV.delete("u:" + gone);
+    return reply(`✅ ลบผู้ใช้ลำดับ ${n} แล้ว`);
+  }
+
+  if (cmd === "ดู") return reply(`รายการหุ้น: ${me.stocks.join(", ") || "(ว่าง)"}`);
+  if (cmd === "ดูหัวข้อ") return reply(`หัวข้อ: ${me.topics.join(", ") || "(ว่าง)"}`);
+
+  if (cmd === "สรุป") {
+    if (await env.KV.get("cd:" + uid)) return reply("รอ 1 นาทีค่อยกดใหม่");
+    await env.KV.put("cd:" + uid, "1", { expirationTtl: 60 });
+    await reply("⏳ กำลังสรุป รอสักครู่");
+    ctx.waitUntil(pushSummary(env, uid));
+    return;
+  }
+
   if (cmd === "หัวข้อ+" || cmd === "หัวข้อ-") {
-    const topics = await getTopics(env);
     const t = rest.toLowerCase();
     if (!t || t.length > 60) return reply("พิมพ์ เช่น หัวข้อ+ nuclear energy (ไม่เกิน 60 ตัวอักษร)");
     if (cmd === "หัวข้อ+") {
-      if (topics.includes(t)) return reply(`มีหัวข้อ "${t}" อยู่แล้ว`);
-      if (topics.length >= MAX_TOPICS) return reply(`เต็มแล้ว (สูงสุด ${MAX_TOPICS} หัวข้อ) ลบก่อนด้วย หัวข้อ- ชื่อ`);
-      await saveTopics(env, [...topics, t]);
+      if (me.topics.includes(t)) return reply(`มีหัวข้อ "${t}" อยู่แล้ว`);
+      if (me.topics.length >= MAX_TOPICS) return reply(`เต็มแล้ว (สูงสุด ${MAX_TOPICS} หัวข้อ) ลบก่อนด้วย หัวข้อ- ชื่อ`);
+      await saveUser(env, uid, { ...me, topics: [...me.topics, t] });
       return reply(`✅ เพิ่มหัวข้อ "${t}" แล้ว`);
     }
-    if (!topics.includes(t)) return reply(`ไม่มีหัวข้อ "${t}" (ดูด้วย ดูหัวข้อ)`);
-    await saveTopics(env, topics.filter((x) => x !== t));
+    if (!me.topics.includes(t)) return reply(`ไม่มีหัวข้อ "${t}" (ดูด้วย ดูหัวข้อ)`);
+    await saveUser(env, uid, { ...me, topics: me.topics.filter((x) => x !== t) });
     return reply(`✅ ลบหัวข้อ "${t}" แล้ว`);
   }
-  if (cmd === "ดู") return reply(`รายการหุ้น: ${list.join(", ") || "(ว่าง)"}`);
-  if (cmd === "สรุป") {
-    await reply("⏳ กำลังสรุป รอสักครู่");
-    ctx.waitUntil(pushSummary(env));
-    return;
-  }
+
   if (cmd === "เพิ่ม" || cmd === "ลบ") {
     if (!/^[A-Z.\-]{1,6}$/.test(ticker)) return reply("ใส่ชื่อหุ้นเป็นตัวอักษรอังกฤษ เช่น เพิ่ม AAPL");
+    const max = admin ? MAX_STOCKS_ADMIN : MAX_STOCKS_USER;
     if (cmd === "เพิ่ม") {
-      if (list.includes(ticker)) return reply(`มี ${ticker} อยู่แล้ว`);
-      if (list.length >= MAX_STOCKS) return reply(`เต็มแล้ว (สูงสุด ${MAX_STOCKS} ตัว)`);
-      await saveStocks(env, [...list, ticker]);
+      if (me.stocks.includes(ticker)) return reply(`มี ${ticker} อยู่แล้ว`);
+      if (me.stocks.length >= max) return reply(`เต็มแล้ว (สูงสุด ${max} ตัว)`);
+      await saveUser(env, uid, { ...me, stocks: [...me.stocks, ticker] });
       return reply(`✅ เพิ่ม ${ticker} แล้ว`);
     }
-    if (!list.includes(ticker)) return reply(`ไม่มี ${ticker} ในรายการ`);
-    await saveStocks(env, list.filter((s) => s !== ticker));
+    if (!me.stocks.includes(ticker)) return reply(`ไม่มี ${ticker} ในรายการ`);
+    await saveUser(env, uid, { ...me, stocks: me.stocks.filter((x) => x !== ticker) });
     return reply(`✅ ลบ ${ticker} แล้ว`);
   }
-  return reply("คำสั่ง: เพิ่ม AAPL · ลบ AAPL · ดู · หัวข้อ+ ชื่อ · หัวข้อ- ชื่อ · ดูหัวข้อ · สรุป");
+  return reply(HELP);
 }
 
 export default {
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(pushSummary(env));
+    ctx.waitUntil(
+      (async () => {
+        const cache = new Map();
+        for (const id of await recipients(env)) {
+          try {
+            await pushSummary(env, id, cache);
+          } catch (e) {
+            console.log("push failed", String(e));
+          }
+        }
+      })()
+    );
   },
 
   async fetch(request, env, ctx) {
@@ -158,8 +245,8 @@ export default {
       return new Response("bad signature", { status: 401 });
     }
     for (const ev of JSON.parse(body).events || []) {
-      if (ev.type === "message" && ev.message?.type === "text" && ev.source?.userId === env.LINE_USER_ID.trim()) {
-        ctx.waitUntil(handleCommand(env, ctx, ev));
+      if (ev.type === "message" && ev.message?.type === "text" && ev.source?.userId && !ev.deliveryContext?.isRedelivery) {
+        ctx.waitUntil(handleCommand(env, ctx, ev, ev.source.userId));
       }
     }
     return new Response("ok");
