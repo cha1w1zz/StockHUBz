@@ -7,7 +7,7 @@ const MAX_STOCKS_USER = 5;
 const DEFAULT_TOPICS = ["artificial intelligence AI industry"];
 const MAX_TOPICS_ADMIN = 5;
 const MAX_TOPICS_USER = 2;
-const NEWS_PER_TOPIC = 8;
+const NEWS_PER_TOPIC = 6;
 const MAX_USERS = 10; // including the admin
 const MAX_MANUAL_PER_DAY = 5; // "สรุป" presses per non-admin user per day (Bangkok time)
 
@@ -154,6 +154,8 @@ async function recipients(env) {
   return [adminId(env), ...members.filter((m) => m !== adminId(env))];
 }
 
+const CLICKBAIT = /^(why|here'?s why|what'?s (going on|happening|behind))\b|should you (buy|sell)|is .{0,40} a (buy|sell)\b|\b(stock|shares)\b.*\b(down|falling|falls|dropping|drops|plunging|sinking|slumping|soaring|jumping)\b.*\btoday\b/i;
+
 async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STOCK) {
   const q = encodeURIComponent(query);
   // Google sometimes returns empty/blocked when many requests fire at once, so retry and widen the window
@@ -169,7 +171,9 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
       const titles = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].map((m) =>
         m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()
       );
-      if (titles.length) return titles.slice(0, limit).map((t) => `- ${t}`);
+      // stock headlines only: drop clickbait like "Why X stock is falling today" (no real event); topics keep everything
+      const kept = ticker ? titles.filter((t) => !CLICKBAIT.test(t)) : titles;
+      if (kept.length) return kept.slice(0, limit).map((t) => `- ${t}`);
     } catch {}
   }
   return [];
