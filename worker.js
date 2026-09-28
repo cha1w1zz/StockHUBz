@@ -10,57 +10,73 @@ const MAX_TOPICS_USER = 2;
 const NEWS_PER_TOPIC = 5;
 const MAX_USERS = 10; // including the admin
 
-const HELP = "คำสั่ง: เพิ่ม AAPL · ลบ AAPL · ดู · หัวข้อ+ ชื่อ · หัวข้อ- ชื่อ · ดูหัวข้อ · รอบ 2 / รอบ 1 เช้า / รอบ 1 เย็น · สรุป";
-
 const LINE_STYLE =
   "\nจัดรูปแบบสำหรับแชท LINE: ห้ามใช้ markdown (ห้าม * # **) ใช้ • แทน bullet " +
   "ขึ้นต้นแต่ละหุ้นด้วย 📌 ชื่อหุ้น และราคา ใส่ 🟢 บวก 🔴 ลบ ⚪ กลาง หน้าผลกระทบ เว้นบรรทัดระหว่างหุ้น\n";
 
 
-// Welcome / how-to card (Flex Message). Buttons send the command as if the user typed it.
-const GREEN = "#0B8F5A";
+// Design tokens (accessible contrast; min text 12px, tap targets >= 44px)
+const GREEN = "#08784B";
+const INK = "#1F2937";
+const MUTED = "#5B6470";
+const WARN = "#B45309";
+const qi = (label, msg) => ({ type: "action", action: { type: "message", label, text: msg } });
+const btn = (label, msg, primary = false) => ({
+  type: "button", height: "md", style: primary ? "primary" : "secondary", color: primary ? GREEN : undefined,
+  action: { type: "message", label, text: msg },
+});
 const step = (n, title, desc) => ({
   type: "box", layout: "horizontal", spacing: "md", margin: "lg",
   contents: [
     { type: "box", layout: "vertical", width: "26px", height: "26px", cornerRadius: "13px", backgroundColor: GREEN, justifyContent: "center", alignItems: "center",
       contents: [{ type: "text", text: String(n), color: "#FFFFFF", size: "sm", weight: "bold", align: "center" }] },
     { type: "box", layout: "vertical", flex: 1, spacing: "xs", contents: [
-      { type: "text", text: title, weight: "bold", size: "sm", wrap: true },
-      { type: "text", text: desc, size: "xs", color: "#666666", wrap: true },
+      { type: "text", text: title, weight: "bold", size: "sm", color: INK, wrap: true },
+      { type: "text", text: desc, size: "xs", color: MUTED, wrap: true },
     ] },
   ],
 });
-const btn = (label, msg, primary = false) => ({
-  type: "button", height: "sm", style: primary ? "primary" : "secondary", color: primary ? GREEN : undefined,
-  action: { type: "message", label, text: msg },
+const row = (label, value, empty = false) => ({
+  type: "box", layout: "vertical", margin: "md", spacing: "xs",
+  contents: [
+    { type: "text", text: label, size: "xs", color: MUTED },
+    { type: "text", text: value, size: "md", weight: "bold", color: empty ? WARN : INK, wrap: true },
+  ],
 });
+const roundsLabel = (r) => (r === "am" ? "เฉพาะเช้า 10:00" : r === "pm" ? "เฉพาะเย็น 19:30" : "เช้า 10:00 + เย็น 19:30");
 
-function welcomeCard(isNew = false) {
+// Main menu card. Doubles as a dashboard of the user's own lists.
+function menuCard(me, { isNew = false, admin = false } = {}) {
+  const maxS = admin ? MAX_STOCKS_ADMIN : MAX_STOCKS_USER;
+  const maxT = admin ? MAX_TOPICS_ADMIN : MAX_TOPICS_USER;
+  const firstRun = !me.stocks.length && !me.topics.length;
+  const body = firstRun
+    ? [
+        step(1, "กด ➕ เพิ่มหุ้น", `เลือกหุ้นที่สนใจ (สูงสุด ${maxS} ตัว)`),
+        step(2, "กด 📰 เพิ่มหัวข้อ", `เช่น พลังงาน AI คริปโต (สูงสุด ${maxT} หัวข้อ)`),
+        step(3, "กด ⚡ สรุปเลย", "หรือรอรับอัตโนมัติ 10:00 และ 19:30"),
+      ]
+    : [
+        row(`📈 หุ้น (${me.stocks.length}/${maxS})`, me.stocks.join(" · ") || "ยังไม่มี กด ➕ เพิ่มหุ้น", !me.stocks.length),
+        row(`📰 หัวข้อ (${me.topics.length}/${maxT})`, me.topics.join(" · ") || "ยังไม่มี กด 📰 เพิ่มหัวข้อ", !me.topics.length),
+        row("⏰ รอบส่ง", roundsLabel(me.rounds)),
+      ];
   return [{
     type: "flex",
-    altText: "วิธีใช้ MARKII: พิมพ์ เพิ่ม NVDA เพื่อเริ่มติดตามหุ้น แล้วพิมพ์ สรุป",
+    altText: `MARKII เมนู: หุ้น ${me.stocks.length}/${maxS}, หัวข้อ ${me.topics.length}/${maxT}`,
     contents: {
       type: "bubble",
       header: {
         type: "box", layout: "vertical", backgroundColor: GREEN, paddingAll: "16px",
         contents: [
           { type: "text", text: "📈 MARKII", color: "#FFFFFF", weight: "bold", size: "xl" },
-          { type: "text", text: isNew ? "ลงทะเบียนให้แล้ว เริ่มได้เลย" : "สรุปข่าวหุ้น + หัวข้อที่คุณสนใจ", color: "#D6F5E8", size: "xs", margin: "sm" },
+          { type: "text", text: isNew ? "ลงทะเบียนให้แล้ว เริ่มได้เลย" : "สรุปข่าวหุ้น + หัวข้อที่คุณสนใจ", color: "#E6F7EF", size: "xs", margin: "sm" },
         ],
       },
-      body: {
-        type: "box", layout: "vertical", paddingAll: "16px",
-        contents: [
-          step(1, "เพิ่มหุ้น (สูงสุด 5 ตัว)", "พิมพ์ เพิ่ม NVDA หรือ เพิ่ม AAPL"),
-          step(2, "เพิ่มหัวข้อข่าว (สูงสุด 2)", "พิมพ์ หัวข้อ+ nuclear energy (ภาษาอังกฤษแม่นกว่า)"),
-          step(3, "ขอสรุปทันที", "พิมพ์ สรุป หรือรอรับอัตโนมัติ 10:00 และ 19:30"),
-          { type: "separator", margin: "lg" },
-          { type: "text", text: "ลบ: ลบ NVDA · หัวข้อ- ชื่อ\nดูรายการ: ดู · ดูหัวข้อ\nเลือกรอบ: รอบ 1 เช้า / รอบ 1 เย็น / รอบ 2", size: "xxs", color: "#888888", wrap: true, margin: "md" },
-        ],
-      },
+      body: { type: "box", layout: "vertical", paddingAll: "16px", contents: body },
       footer: {
         type: "box", layout: "vertical", spacing: "sm",
-        contents: [btn("➕ เพิ่ม NVDA", "เพิ่ม NVDA", true), btn("📋 ดูรายการของฉัน", "ดู"), btn("⚡ สรุปเลย", "สรุป")],
+        contents: [btn("⚡ สรุปเลย", "สรุป", true), btn("➕ เพิ่มหุ้น", "เพิ่มหุ้น"), btn("📰 เพิ่มหัวข้อ", "เพิ่มหัวข้อ"), btn("⏰ ตั้งรอบ", "ตั้งรอบ"), btn("🗑 ลบรายการ", "ลบรายการ")],
       },
     },
   }];
@@ -76,10 +92,10 @@ async function adminCard(env) {
       type: "box", layout: "horizontal", alignItems: "center", margin: "md",
       contents: [
         { type: "box", layout: "vertical", flex: 1, contents: [
-          { type: "text", text: `${i + 1}. ...${m.slice(-6)}`, size: "sm", weight: "bold" },
-          { type: "text", text: `หุ้น ${u.stocks.length} · หัวข้อ ${u.topics.length}${u.rounds && u.rounds !== "both" ? " · " + (u.rounds === "am" ? "เช้า" : "เย็น") : ""}`, size: "xxs", color: "#888888" },
+          { type: "text", text: `${i + 1}. ...${m.slice(-6)}`, size: "sm", weight: "bold", color: INK },
+          { type: "text", text: `หุ้น ${u.stocks.length} · หัวข้อ ${u.topics.length}${u.rounds && u.rounds !== "both" ? " · " + (u.rounds === "am" ? "เช้า" : "เย็น") : ""}`, size: "xs", color: MUTED },
         ] },
-        { type: "button", height: "sm", style: "secondary", flex: 0, action: { type: "message", label: "เตะ", text: `เตะ ${i + 1}` } },
+        { type: "button", height: "md", style: "secondary", flex: 0, action: { type: "message", label: "เตะ", text: `เตะ ${i + 1}` } },
       ],
     });
   }
@@ -92,7 +108,7 @@ async function adminCard(env) {
         type: "box", layout: "vertical", backgroundColor: "#1F2937", paddingAll: "16px",
         contents: [
           { type: "text", text: "🛠 แผงแอดมิน MARKII", color: "#FFFFFF", weight: "bold", size: "lg" },
-          { type: "text", text: `ผู้ใช้ ${members.length + 1}/${MAX_USERS} (รวมคุณ)`, color: "#D1D5DB", size: "xs", margin: "sm" },
+          { type: "text", text: `ผู้ใช้ ${members.length + 1}/${MAX_USERS} (รวมคุณ)`, color: "#E5E7EB", size: "xs", margin: "sm" },
         ],
       },
       body: {
@@ -103,7 +119,7 @@ async function adminCard(env) {
       },
       footer: {
         type: "box", layout: "vertical", spacing: "sm",
-        contents: [btn("⚡ สรุปเลย", "สรุป", true), btn("📋 รายการของฉัน", "ดู"), btn("📖 การ์ดวิธีใช้ (ของผู้ใช้)", "วิธีใช้")],
+        contents: [btn("⚡ สรุปเลย", "สรุป", true), btn("📋 เมนูของฉัน", "เมนู")],
       },
     },
   }];
@@ -205,7 +221,7 @@ async function line(env, path, body) {
   if (!r.ok) console.log("LINE error", r.status, (await r.text()).slice(0, 200));
 }
 
-const text = (t) => [{ type: "text", text: t.slice(0, 5000) }];
+const text = (t, qr) => [{ type: "text", text: t.slice(0, 5000), ...(qr ? { quickReply: { items: qr } } : {}) }];
 
 // cache lets one cron run share fetches between users who follow the same stock/topic
 async function pushSummary(env, userId, cache = new Map(), skipEmpty = false, slot = null) {
@@ -219,7 +235,7 @@ async function pushSummary(env, userId, cache = new Map(), skipEmpty = false, sl
   if (slot && u && u.rounds && u.rounds !== "both" && u.rounds !== slot) return;
   if (!u || (!u.stocks.length && !u.topics.length)) {
     if (skipEmpty) return;
-    return line(env, "push", { to: userId, messages: welcomeCard() });
+    return line(env, "push", { to: userId, messages: menuCard(u || { stocks: [], topics: [] }, { admin: isAdmin(env, userId) }) });
   }
   const topicParts = await Promise.all(
     u.topics.map(async (t) => `## หัวข้อ: ${t}\n${(await memo("t:" + t, () => fetchNews("", `${t} news`, NEWS_PER_TOPIC))).join("\n")}`)
@@ -250,12 +266,13 @@ async function validSignature(env, body, sig) {
 
 async function handleFollow(env, ev, uid) {
   const reply = (m) => line(env, "reply", { replyToken: ev.replyToken, messages: m });
-  if (await getUser(env, uid)) return reply(welcomeCard());
+  const existing = await getUser(env, uid);
+  if (existing) return reply(menuCard(existing, { admin: isAdmin(env, uid) }));
   const members = await getMembers(env);
   if (members.length + 1 >= MAX_USERS) return reply(text("ขออภัย ตอนนี้ผู้ใช้เต็มแล้ว"));
   await env.KV.put("members", JSON.stringify([...members, uid]));
   await saveUser(env, uid, { stocks: [], topics: [] });
-  return reply(welcomeCard(true));
+  return reply(menuCard({ stocks: [], topics: [] }, { isNew: true }));
 }
 
 async function handleCommand(env, ctx, ev, uid) {
@@ -263,7 +280,8 @@ async function handleCommand(env, ctx, ev, uid) {
   const [cmd, arg] = msg.split(/\s+/);
   const rest = msg.slice((cmd || "").length).trim().replace(/\s+/g, " ");
   const ticker = (arg || "").toUpperCase();
-  const reply = (t) => line(env, "reply", { replyToken: ev.replyToken, messages: text(t) });
+  const reply = (t, qr) => line(env, "reply", { replyToken: ev.replyToken, messages: text(t, qr) });
+  const after = [qi("⚡ สรุป", "สรุป"), qi("➕ เพิ่มหุ้น", "เพิ่มหุ้น"), qi("📋 เมนู", "เมนู")];
   const admin = isAdmin(env, uid);
 
   // Open join: anyone who messages the bot is registered, up to MAX_USERS
@@ -274,11 +292,27 @@ async function handleCommand(env, ctx, ev, uid) {
     await env.KV.put("members", JSON.stringify([...members, uid]));
     me = { stocks: [], topics: [] };
     await saveUser(env, uid, me);
-    return line(env, "reply", { replyToken: ev.replyToken, messages: welcomeCard(true) });
+    return line(env, "reply", { replyToken: ev.replyToken, messages: menuCard(me, { isNew: true, admin }) });
   }
 
-  if (cmd === "วิธีใช้" || cmd === "เมนู" || cmd === "help") {
-    return line(env, "reply", { replyToken: ev.replyToken, messages: welcomeCard() });
+  const showMenu = () => line(env, "reply", { replyToken: ev.replyToken, messages: menuCard(me, { admin }) });
+  if (["วิธีใช้", "เมนู", "help", "ดู", "ดูหัวข้อ"].includes(cmd)) return showMenu();
+
+  // Prompts that answer with one-tap Quick Replies instead of making people type
+  if (cmd === "เพิ่มหุ้น" || (cmd === "เพิ่ม" && !arg)) {
+    const pick = ["NVDA", "AAPL", "TSLA", "MSFT", "GOOGL", "AMZN", "META", "AMD"].filter((t) => !me.stocks.includes(t)).slice(0, 8);
+    return reply("เลือกหุ้นด้านล่าง หรือพิมพ์เองเช่น เพิ่ม PLTR (ตัวอักษรอังกฤษ)", pick.map((t) => qi(t, `เพิ่ม ${t}`)));
+  }
+  if (cmd === "เพิ่มหัวข้อ") {
+    const pick = ["AI", "nuclear energy", "oil price", "crypto"].filter((t) => !me.topics.includes(t.toLowerCase()));
+    return reply("เลือกหัวข้อด้านล่าง หรือพิมพ์เองเช่น หัวข้อ+ electric vehicle (ภาษาอังกฤษแม่นกว่า)", pick.map((t) => qi(t, `หัวข้อ+ ${t}`)));
+  }
+  if (cmd === "ตั้งรอบ") {
+    return reply("อยากรับสรุปตอนไหน?", [qi("เช้า+เย็น", "รอบ 2"), qi("เฉพาะเช้า 10:00", "รอบ 1 เช้า"), qi("เฉพาะเย็น 19:30", "รอบ 1 เย็น")]);
+  }
+  if (cmd === "ลบรายการ") {
+    const items = [...me.stocks.map((t) => qi(`ลบ ${t}`, `ลบ ${t}`)), ...me.topics.map((t) => qi(`ลบ ${t}`.slice(0, 20), `หัวข้อ- ${t}`))];
+    return items.length ? reply("เลือกรายการที่จะลบ", items.slice(0, 13)) : reply("รายการยังว่าง ไม่มีอะไรให้ลบ", after);
   }
   if (admin && (cmd === "แอดมิน" || cmd === "admin")) {
     return line(env, "reply", { replyToken: ev.replyToken, messages: await adminCard(env) });
@@ -295,7 +329,7 @@ async function handleCommand(env, ctx, ev, uid) {
     const gone = members[n - 1];
     await env.KV.put("members", JSON.stringify(members.filter((m) => m !== gone)));
     await env.KV.delete("u:" + gone);
-    return reply(`✅ ลบผู้ใช้ลำดับ ${n} แล้ว`);
+    return line(env, "reply", { replyToken: ev.replyToken, messages: [...text(`✅ เตะผู้ใช้ลำดับ ${n} แล้ว`), ...(await adminCard(env))] });
   }
 
   if (cmd === "รอบ") {
@@ -303,10 +337,8 @@ async function handleCommand(env, ctx, ev, uid) {
     const v = map[rest];
     if (!v) return reply("พิมพ์: รอบ 2 (เช้า+เย็น) · รอบ 1 เช้า (10:00) · รอบ 1 เย็น (19:30)");
     await saveUser(env, uid, { ...me, rounds: v });
-    return reply(`✅ ตั้งรอบแล้ว: ${rest === "2" ? "วันละ 2 รอบ (10:00 และ 19:30)" : rest === "1 เช้า" ? "เฉพาะเช้า 10:00" : "เฉพาะเย็น 19:30"}`);
+    return reply(`✅ ตั้งรอบแล้ว: ${rest === "2" ? "วันละ 2 รอบ (10:00 และ 19:30)" : rest === "1 เช้า" ? "เฉพาะเช้า 10:00" : "เฉพาะเย็น 19:30"}`, after);
   }
-  if (cmd === "ดู") return reply(`รายการหุ้น: ${me.stocks.join(", ") || "(ว่าง)"}`);
-  if (cmd === "ดูหัวข้อ") return reply(`หัวข้อ: ${me.topics.join(", ") || "(ว่าง)"}`);
 
   if (cmd === "สรุป") {
     if (await env.KV.get("cd:" + uid)) return reply("รอ 1 นาทีค่อยกดใหม่");
@@ -324,11 +356,11 @@ async function handleCommand(env, ctx, ev, uid) {
       const maxTopics = admin ? MAX_TOPICS_ADMIN : MAX_TOPICS_USER;
       if (me.topics.length >= maxTopics) return reply(`เต็มแล้ว (สูงสุด ${maxTopics} หัวข้อ) ลบก่อนด้วย หัวข้อ- ชื่อ`);
       await saveUser(env, uid, { ...me, topics: [...me.topics, t] });
-      return reply(`✅ เพิ่มหัวข้อ "${t}" แล้ว`);
+      return reply(`✅ เพิ่มหัวข้อ "${t}" แล้ว`, after);
     }
     if (!me.topics.includes(t)) return reply(`ไม่มีหัวข้อ "${t}" (ดูด้วย ดูหัวข้อ)`);
     await saveUser(env, uid, { ...me, topics: me.topics.filter((x) => x !== t) });
-    return reply(`✅ ลบหัวข้อ "${t}" แล้ว`);
+    return reply(`✅ ลบหัวข้อ "${t}" แล้ว`, after);
   }
 
   if (cmd === "เพิ่ม" || cmd === "ลบ") {
@@ -338,13 +370,13 @@ async function handleCommand(env, ctx, ev, uid) {
       if (me.stocks.includes(ticker)) return reply(`มี ${ticker} อยู่แล้ว`);
       if (me.stocks.length >= max) return reply(`เต็มแล้ว (สูงสุด ${max} ตัว)`);
       await saveUser(env, uid, { ...me, stocks: [...me.stocks, ticker] });
-      return reply(`✅ เพิ่ม ${ticker} แล้ว`);
+      return reply(`✅ เพิ่ม ${ticker} แล้ว ลองกด ⚡ สรุป เพื่อดูตัวอย่าง`, after);
     }
     if (!me.stocks.includes(ticker)) return reply(`ไม่มี ${ticker} ในรายการ`);
     await saveUser(env, uid, { ...me, stocks: me.stocks.filter((x) => x !== ticker) });
-    return reply(`✅ ลบ ${ticker} แล้ว`);
+    return reply(`✅ ลบ ${ticker} แล้ว`, after);
   }
-  return line(env, "reply", { replyToken: ev.replyToken, messages: welcomeCard() });
+  return reply("ไม่เข้าใจคำสั่งนี้ ลองกดปุ่มด้านล่าง", after);
 }
 
 export default {
