@@ -37,7 +37,7 @@ def fetch_news(query, limit):
 
 
 def fetch_price(ticker):
-    hist = yf.Ticker(ticker).history(period="5d")
+    hist = yf.Ticker(ticker).history(period="5d").dropna(subset=["Close"])
     if len(hist) < 2:
         return "ไม่มีข้อมูลราคา"
     last, prev = hist["Close"].iloc[-1], hist["Close"].iloc[-2]
@@ -61,7 +61,7 @@ def summarize(key, model, data, style=""):
     r = requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
         headers={"Authorization": f"Bearer {key}"},
-        json={"model": model, "messages": [{"role": "user", "content": prompt}]},
+        json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 2000},
         timeout=120,
     )
     r.raise_for_status()
