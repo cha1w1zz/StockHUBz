@@ -9,6 +9,7 @@ const MAX_TOPICS_ADMIN = 3;
 const MAX_TOPICS_USER = 2;
 const NEWS_PER_TOPIC = 5;
 const MAX_USERS = 10; // including the admin
+const MAX_MANUAL_PER_DAY = 5; // "สรุป" presses per non-admin user per day (Bangkok time)
 
 // Design tokens (accessible contrast; min text 12px, tap targets >= 44px)
 const GREEN = "#08784B";
@@ -367,6 +368,12 @@ async function handleCommand(env, ctx, ev, uid) {
 
   if (cmd === "สรุป") {
     if (await env.KV.get("cd:" + uid)) return reply("รอ 1 นาทีค่อยกดใหม่");
+    if (!isAdmin(env, uid)) {
+      const dayKey = `dc:${uid}:${new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10)}`;
+      const used = parseInt((await env.KV.get(dayKey)) || "0", 10);
+      if (used >= MAX_MANUAL_PER_DAY) return reply(`วันนี้กดสรุปครบ ${MAX_MANUAL_PER_DAY} ครั้งแล้ว พรุ่งนี้ค่อยกดใหม่ (ยังได้รับสรุปอัตโนมัติตามปกติ)`);
+      await env.KV.put(dayKey, String(used + 1), { expirationTtl: 172800 });
+    }
     await env.KV.put("cd:" + uid, "1", { expirationTtl: 60 });
     await reply("⏳ กำลังสรุป รอสักครู่");
     ctx.waitUntil(pushSummary(env, uid));
