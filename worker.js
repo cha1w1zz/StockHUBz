@@ -9,7 +9,7 @@ const MAX_TOPICS = 3;
 const NEWS_PER_TOPIC = 5;
 const MAX_USERS = 10; // including the admin
 
-const HELP = "คำสั่ง: เพิ่ม AAPL · ลบ AAPL · ดู · หัวข้อ+ ชื่อ · หัวข้อ- ชื่อ · ดูหัวข้อ · สรุป";
+const HELP = "คำสั่ง: เพิ่ม AAPL · ลบ AAPL · ดู · หัวข้อ+ ชื่อ · หัวข้อ- ชื่อ · ดูหัวข้อ · รอบ 2 / รอบ 1 เช้า / รอบ 1 เย็น · สรุป";
 
 const LINE_STYLE =
   "\nจัดรูปแบบสำหรับแชท LINE: ห้ามใช้ markdown (ห้าม * # **) ใช้ • แทน bullet " +
@@ -65,15 +65,20 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
 
 async function fetchPrice(ticker) {
   try {
-    const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5d&interval=1d`, {
+    const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d`, {
       headers: { "User-Agent": "Mozilla/5.0" },
     });
     if (!res.ok) return "ไม่มีข้อมูลราคา";
     const j = await res.json();
     const closes = (j.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []).filter((x) => x != null);
-    if (closes.length < 2) return "ไม่มีข้อมูลราคา";
-    const last = closes.at(-1), prev = closes.at(-2);
-    return `ปิดล่าสุด ${last.toFixed(2)} ดอลลาร์ (${(((last - prev) / prev) * 100).toFixed(2)}% จากวันก่อน)`;
+    if (closes.length < 6) return "ไม่มีข้อมูลราคา";
+    const last = closes.at(-1), prev = closes.at(-2), d5 = closes.at(-6);
+    const hi = Math.max(...closes), lo = Math.min(...closes);
+    const pct = (a, b) => (((a - b) / b) * 100).toFixed(2);
+    return (
+      `ปิดล่าสุด ${last.toFixed(2)} ดอลลาร์ (${pct(last, prev)}% จากวันก่อน) · 5 วัน ${pct(last, d5)}% · ` +
+      `52 สัปดาห์ ต่ำ ${lo.toFixed(2)} สูง ${hi.toFixed(2)} (ห่างจากสูงสุด ${pct(last, hi)}%)`
+    );
   } catch {
     return "ไม่มีข้อมูลราคา";
   }
@@ -84,12 +89,14 @@ async function summarize(env, data) {
   const dd = `${String(now.getUTCDate()).padStart(2, "0")}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${now.getUTCFullYear() + 543}`;
   const prompt =
     `วันนี้ ${dd} (พ.ศ.) สรุปข่าวต่อไปนี้เป็นไทย สั้นมาก:\n` +
-    "1) ทีละหัวข้อ (ส่วน ## หัวข้อ:) สรุปข่าวเด่น 2-3 ข้อ\n2) ทีละหุ้น: ราคา + ข่าวเด่น 1 ข้อ + ผลกระทบ บวก/ลบ/กลาง\n" +
+    "1) ทีละหัวข้อ (ส่วน ## หัวข้อ:) สรุปข่าวเด่น 2-3 ข้อ\n" +
+    "2) ทีละหุ้น เรียงบรรทัดตามนี้: ราคาวันนี้ · แนวโน้ม 5 วัน + ตำแหน่งเทียบช่วง 52 สัปดาห์ (ใช้ตัวเลขที่ให้เท่านั้น) · ข่าวเด่น 1 ข้อ + ผลกระทบ บวก/ลบ/กลาง · " +
+    "อารมณ์ข่าว: นับพาดหัวที่ให้ว่า บวก/ลบ/กลาง อย่างละกี่ข้อ (นับจริง ห้ามเดา) · จับตา: ความเสี่ยงหรือสิ่งที่ควรติดตาม 1 ข้อ อ้างจากพาดหัวที่ให้เท่านั้น ถ้าไม่มีให้เขียนว่า ไม่มีข้อมูลเพิ่มเติม\n" +
     "ห้ามแนะนำซื้อขาย ข้อมูลไม่พอให้บอกตรงๆ ห้ามเดา\n" + LINE_STYLE + "\n" + data;
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY.trim()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 900 }),
+    body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 1300 }),
   });
   if (!r.ok) throw new Error(`OpenRouter ${r.status}: ${(await r.text()).slice(0, 300)}`);
   return (await r.json()).choices[0].message.content;
@@ -107,13 +114,15 @@ async function line(env, path, body) {
 const text = (t) => [{ type: "text", text: t.slice(0, 5000) }];
 
 // cache lets one cron run share fetches between users who follow the same stock/topic
-async function pushSummary(env, userId, cache = new Map(), skipEmpty = false) {
+async function pushSummary(env, userId, cache = new Map(), skipEmpty = false, slot = null) {
   const memo = (key, fn) => {
     if (!cache.has(key)) cache.set(key, fn());
     return cache.get(key);
   };
   const push = (t) => line(env, "push", { to: userId, messages: text(t) });
   const u = await getUser(env, userId);
+  // slot is "am"/"pm" on cron runs; users can opt out of one round
+  if (slot && u && u.rounds && u.rounds !== "both" && u.rounds !== slot) return;
   if (!u || (!u.stocks.length && !u.topics.length)) {
     if (skipEmpty) return;
     return push("ยังไม่มีหุ้นหรือหัวข้อ พิมพ์ เพิ่ม AAPL หรือ หัวข้อ+ nuclear energy");
@@ -136,7 +145,7 @@ async function pushSummary(env, userId, cache = new Map(), skipEmpty = false) {
   }
   const now = new Date(Date.now() + 7 * 3600 * 1000);
   const stamp = `${String(now.getUTCDate()).padStart(2, "0")}/${String(now.getUTCMonth() + 1).padStart(2, "0")} ${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
-  await push(`📈 สรุปข่าว ${stamp}\n\n${summary}\n\n(ไม่ใช่คำแนะนำการลงทุน)`);
+  await push(`📈 สรุปข่าว ${stamp}\n\n${summary.slice(0, 4600)}\n\n(ไม่ใช่คำแนะนำการลงทุน)`);
 }
 
 async function validSignature(env, body, sig) {
@@ -179,6 +188,13 @@ async function handleCommand(env, ctx, ev, uid) {
     return reply(`✅ ลบผู้ใช้ลำดับ ${n} แล้ว`);
   }
 
+  if (cmd === "รอบ") {
+    const map = { "2": "both", "1 เช้า": "am", "1 เย็น": "pm" };
+    const v = map[rest];
+    if (!v) return reply("พิมพ์: รอบ 2 (เช้า+เย็น) · รอบ 1 เช้า (10:00) · รอบ 1 เย็น (19:30)");
+    await saveUser(env, uid, { ...me, rounds: v });
+    return reply(`✅ ตั้งรอบแล้ว: ${rest === "2" ? "วันละ 2 รอบ (10:00 และ 19:30)" : rest === "1 เช้า" ? "เฉพาะเช้า 10:00" : "เฉพาะเย็น 19:30"}`);
+  }
   if (cmd === "ดู") return reply(`รายการหุ้น: ${me.stocks.join(", ") || "(ว่าง)"}`);
   if (cmd === "ดูหัวข้อ") return reply(`หัวข้อ: ${me.topics.join(", ") || "(ว่าง)"}`);
 
@@ -223,13 +239,15 @@ async function handleCommand(env, ctx, ev, uid) {
 export default {
   async scheduled(event, env, ctx) {
     // People with empty lists only get the reminder on the morning run (03:00 UTC = 10:00 BKK)
-    const skipEmpty = event.cron !== "0 3 * * *";
+    const morning = event.cron === "0 3 * * *";
+    const skipEmpty = !morning;
+    const slot = morning ? "am" : "pm";
     ctx.waitUntil(
       (async () => {
         const cache = new Map();
         for (const id of await recipients(env)) {
           try {
-            await pushSummary(env, id, cache, skipEmpty);
+            await pushSummary(env, id, cache, skipEmpty, slot);
           } catch (e) {
             console.log("push failed", String(e));
           }
