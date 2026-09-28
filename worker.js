@@ -163,7 +163,16 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
     const titles = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].map((m) =>
       m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()
     );
-    return titles.slice(0, limit).map((t) => `- ${t}`);
+    // same story often appears from several outlets: drop headlines whose words mostly overlap an earlier one
+    const words = (t) => new Set(t.replace(/\s+-\s+[^-]+$/, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2));
+    const seen = [];
+    const unique = titles.filter((t) => {
+      const w = words(t);
+      if (!w.size || seen.some((s) => [...w].filter((x) => s.has(x)).length / Math.min(w.size, s.size) >= 0.7)) return false;
+      seen.push(w);
+      return true;
+    });
+    return unique.slice(0, limit).map((t) => `- ${t}`);
   } catch {
     return [];
   }
@@ -216,6 +225,7 @@ async function summarize(env, data) {
     "- แปลพาดหัวข่าวเป็นภาษาไทยทุกข้อ ห้ามคัดลอกประโยคภาษาอังกฤษ (ยกเว้นชื่อบริษัท ตัวย่อหุ้น และศัพท์เฉพาะ เช่น AI, GPU)\n" +
     "- ทุกหุ้นต้องมีครบทั้ง 4 บรรทัดตามแบบด้านล่าง ห้ามข้ามบรรทัดไหนเด็ดขาด โดยเฉพาะ 'จับตา'\n" +
     "- ใช้เฉพาะตัวเลขและพาดหัวที่ให้มา ห้ามเดา ห้ามแนะนำซื้อขาย ข้อมูลไม่พอให้เขียนว่า ไม่มีข้อมูลเพิ่มเติม\n" +
+    "- ถ้าหลายพาดหัวเป็นข่าวเรื่องเดียวกัน (คนละสำนัก) ให้รวมเป็นข่าวเดียว ห้ามเล่าซ้ำ และนับอารมณ์ข่าวเป็น 1 ข่าว\n" +
     "- กระชับ แต่ห้ามตัดบรรทัด\n\n" +
     "แบบสำหรับส่วน '## หัวข้อ:' (ทีละหัวข้อ):\n" +
     "📰 ชื่อหัวข้อ\n• ข่าวเด่น 2-3 ข้อ แปลเป็นไทย\n\n" +
@@ -224,7 +234,7 @@ async function summarize(env, data) {
     "• แนวโน้ม: 5 วัน ±% · ตำแหน่งเทียบช่วง 52 สัปดาห์ (จากตัวเลขที่ให้)\n" +
     "• ข่าวเด่น: (แปลไทย 1 ข้อ) แล้วตามด้วย 🟢 บวก / 🔴 ลบ / ⚪ กลาง\n" +
     "• อารมณ์ข่าว: บวก X / ลบ Y / กลาง Z (นับจากพาดหัวที่ให้ นับจริง)\n" +
-    "• จับตา: ความเสี่ยงหรือสิ่งที่ควรติดตาม 1 ข้อ อ้างจากพาดหัวที่ให้ (ถ้าไม่มีเขียนว่า ไม่มีข้อมูลเพิ่มเติม)\n\n" +
+    "• จับตา: ต้องมีทุกหุ้น ถ้าพาดหัวที่ให้พูดถึงความเสี่ยงหรือเหตุการณ์ที่ต้องติดตาม (เช่น ประกาศงบ กฎระเบียบ คู่แข่ง) ให้สรุป 1 ข้อ ถ้าไม่มีจริงๆ ให้เขียนตรงๆ ว่า ไม่มีข้อมูลเพิ่มเติม ห้ามคิดเองหรือเดาเพื่อให้ครบ\n\n" +
     "ไม่ใช้ markdown (ห้าม * # **) เว้นบรรทัดระหว่างหุ้น\n\n" + data;
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -234,7 +244,11 @@ async function summarize(env, data) {
   if (!r.ok) throw new Error(`OpenRouter ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const j = await r.json();
   const choice = j.choices[0];
-  const out = choice.message.content;
+  // safety net: if the model still drops a stock's 'จับตา' line, add the honest fallback instead of leaving it out
+  const out = choice.message.content
+    .split(/(?=📌)/)
+    .map((b) => (b.startsWith("📌") && !b.includes("จับตา") ? `${b.trimEnd()}\n• จับตา: ไม่มีข้อมูลเพิ่มเติม\n\n` : b))
+    .join("");
   return choice.finish_reason === "length" ? out + "\n\n(สรุปยาวเกินจึงถูกตัดท้าย ลดจำนวนหุ้นหรือหัวข้อได้)" : out;
 }
 
