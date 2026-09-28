@@ -1,4 +1,5 @@
 """Fetch stock news (Google News RSS) + prices (yfinance), summarize via OpenRouter."""
+import hashlib
 import json
 import os
 import sys
@@ -65,6 +66,8 @@ def summarize(key, model, data, style=""):
         json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 2000},
         timeout=120,
     )
+    if not r.ok:
+        print("OpenRouter says:", r.text[:300])
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
 
@@ -86,7 +89,8 @@ def main():
         news = fetch_news(s["query"], cfg["news_per_stock"])
         parts.append(f"## {s['name']}\nราคา: {fetch_price(s['ticker'])}\nข่าว:\n" + "\n".join(news))
     key = env("OPENROUTER_API_KEY") or sys.exit("OPENROUTER_API_KEY missing")
-    print(f"key check: starts with {key[:6]!r}, length {len(key)}")  # shape only, never the key
+    fp = hashlib.sha256(key.encode()).hexdigest()[:8]
+    print(f"key check: starts with {key[:6]!r}, length {len(key)}, fingerprint {fp}")  # never the key itself
     line_token, line_user = env("LINE_TOKEN"), env("LINE_USER_ID")
     summary = summarize(key, cfg["model"], "\n\n".join(parts), LINE_STYLE if line_token else "")
 
