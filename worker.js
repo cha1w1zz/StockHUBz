@@ -194,6 +194,23 @@ async function fetchPrice(ticker) {
   }
 }
 
+// Yahoo symbol search (free, no AI tokens). Returns null when the lookup itself fails.
+async function searchSymbols(q) {
+  try {
+    const res = await fetch(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0&listsCount=0`, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return (j.quotes || [])
+      .filter((x) => ["EQUITY", "ETF"].includes(x.quoteType) && /^[A-Z.\-]{1,6}$/.test(x.symbol || ""))
+      .slice(0, 5)
+      .map((x) => ({ symbol: x.symbol, name: x.shortname || x.longname || "" }));
+  } catch {
+    return null;
+  }
+}
+
 async function summarize(env, data) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
   const dd = `${String(now.getUTCDate()).padStart(2, "0")}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${now.getUTCFullYear() + 543}`;
@@ -364,14 +381,29 @@ async function handleCommand(env, ctx, ev, uid) {
   }
 
   if (cmd === "เพิ่ม" || cmd === "ลบ") {
-    if (!/^[A-Z.\-]{1,6}$/.test(ticker)) return reply("ใส่ชื่อหุ้นเป็นตัวอักษรอังกฤษ เช่น เพิ่ม AAPL");
     const max = admin ? MAX_STOCKS_ADMIN : MAX_STOCKS_USER;
     if (cmd === "เพิ่ม") {
+      let ticker = (rest || "").toUpperCase();
+      const looksLikeTicker = /^[A-Z.\-]{1,6}$/.test(ticker);
+      // Typed in capitals like NVDA -> use as is. Anything else (apple, tesla, "electric car") -> look it up.
+      if (!(looksLikeTicker && rest === ticker)) {
+        const found = await searchSymbols(rest);
+        if (found === null) {
+          if (!looksLikeTicker) return reply("ค้นหาชื่อบริษัทไม่ได้ตอนนี้ ลองพิมพ์ตัวย่อหุ้น เช่น เพิ่ม AAPL");
+        } else {
+          const exact = found.find((f) => f.symbol === ticker);
+          if (exact) ticker = exact.symbol;
+          else if (!found.length) return reply(`ไม่พบหุ้น "${rest}" ลองพิมพ์ชื่อบริษัทภาษาอังกฤษ หรือตัวย่อ เช่น เพิ่ม AAPL`);
+          else return reply(`เจอหลายตัว เลือกได้เลย:\n${found.map((f) => `${f.symbol} ${f.name}`).join("\n")}`, found.map((f) => qi(`${f.symbol} ${f.name}`.slice(0, 20), `เพิ่ม ${f.symbol}`)));
+        }
+      }
+      if (!/^[A-Z.\-]{1,6}$/.test(ticker)) return reply("ใส่ชื่อหุ้นเป็นตัวอักษรอังกฤษ เช่น เพิ่ม AAPL");
       if (me.stocks.includes(ticker)) return reply(`มี ${ticker} อยู่แล้ว`);
       if (me.stocks.length >= max) return reply(`เต็มแล้ว (สูงสุด ${max} ตัว)`);
       await saveUser(env, uid, { ...me, stocks: [...me.stocks, ticker] });
       return reply(`✅ เพิ่ม ${ticker} แล้ว ลองกด ⚡ สรุป เพื่อดูตัวอย่าง`, after);
     }
+    if (!/^[A-Z.\-]{1,6}$/.test(ticker)) return reply("ใส่ชื่อหุ้นเป็นตัวอักษรอังกฤษ เช่น ลบ AAPL");
     if (!me.stocks.includes(ticker)) return reply(`ไม่มี ${ticker} ในรายการ`);
     await saveUser(env, uid, { ...me, stocks: me.stocks.filter((x) => x !== ticker) });
     return reply(`✅ ลบ ${ticker} แล้ว`, after);
