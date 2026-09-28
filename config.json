@@ -1,0 +1,9 @@
+{
+  "model": "google/gemini-2.5-flash-lite",
+  "news_per_stock": 8,
+  "stocks": [
+    {"name": "PTT", "ticker": "PTT.BK", "query": "PTT หุ้น"},
+    {"name": "KBANK", "ticker": "KBANK.BK", "query": "KBANK หุ้น"},
+    {"name": "AOT", "ticker": "AOT.BK", "query": "AOT หุ้น"}
+  ]
+}

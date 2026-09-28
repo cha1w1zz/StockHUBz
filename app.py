@@ -1,0 +1,44 @@
+"""Web app: user brings own OpenRouter key. Key is used for one request only, never stored."""
+import requests
+import streamlit as st
+
+from news import fetch_news, fetch_price, summarize
+
+MODEL = "google/gemini-2.5-flash-lite"
+
+st.set_page_config(page_title="สรุปข่าวหุ้น", page_icon="📈")
+st.title("📈 สรุปข่าวหุ้นไทย")
+st.caption("ดึงข่าว 2 วันล่าสุด + ราคา แล้วให้ AI สรุป · ไม่ใช่คำแนะนำการลงทุน")
+
+with st.expander("🔒 เรื่องความปลอดภัยของ API key"):
+    st.markdown(
+        "- เว็บนี้**ไม่บันทึก key** ใช้แค่ตอนกดสรุปแล้วทิ้ง\n"
+        "- แนะนำให้**สร้าง key แยก**ที่ openrouter.ai/keys และตั้ง credit limit ต่ำๆ (เช่น $1)\n"
+        "- ค่าใช้จ่ายประมาณไม่ถึง 0.05 บาทต่อครั้ง"
+    )
+
+key = st.text_input("OpenRouter API key", type="password", placeholder="sk-or-v1-...")
+stocks_text = st.text_input(
+    "ชื่อหุ้น (คั่นด้วยเว้นวรรค)", value=st.query_params.get("stocks", "PTT KBANK AOT")
+)
+st.query_params["stocks"] = stocks_text  # remember in URL for bookmarking
+
+if st.button("สรุปข่าว", type="primary"):
+    names = stocks_text.upper().split()[:10]
+    if not key.startswith("sk-or-"):
+        st.error("ใส่ API key ให้ถูกก่อน (ขึ้นต้นด้วย sk-or-)")
+    elif not names:
+        st.error("ใส่ชื่อหุ้นอย่างน้อย 1 ตัว")
+    else:
+        with st.spinner("กำลังดึงข่าวและสรุป..."):
+            try:
+                parts = [
+                    f"## {n}\nราคา: {fetch_price(n + '.BK')}\nข่าว:\n" + "\n".join(fetch_news(n + " หุ้น", 8))
+                    for n in names
+                ]
+                st.markdown(summarize(key, MODEL, "\n\n".join(parts)))
+            except requests.HTTPError as e:
+                code = e.response.status_code
+                st.error("API key ไม่ถูกต้อง" if code == 401 else "เงินใน key หมด" if code == 402 else f"OpenRouter error {code}")
+            except Exception as e:
+                st.error(f"เกิดข้อผิดพลาด: {type(e).__name__}")
