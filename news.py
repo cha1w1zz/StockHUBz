@@ -19,8 +19,8 @@ BKK = timezone(timedelta(hours=7))
 
 def env(name):
     """Read from environment (GitHub Secrets) first, then local .env."""
-    if os.environ.get(name):
-        return os.environ[name]
+    if os.environ.get(name, "").strip():
+        return os.environ[name].strip().strip('"')
     f = HERE / ".env"
     for line in f.read_text(encoding="utf-8").splitlines() if f.exists() else []:
         if line.startswith(name + "="):
