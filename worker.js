@@ -154,6 +154,25 @@ async function recipients(env) {
   return [adminId(env), ...members.filter((m) => m !== adminId(env))];
 }
 
+// Drop non-news results (quote/profile pages, price tables, listicles, ads) and near-duplicates.
+const JUNK_TITLE = [
+  /stock price[, ]/i, /share price/i, /quote\b.*\bhistory/i, /price,? news,? quote/i,
+  /ราคาหุ้น.*(ข่าว|ใบเสนอราคา|ประวัติ)/, /ใบเสนอราคา/,
+  /\b(company )?profile\b/i, /\bhistorical (prices|data)\b/i, /\bstock forecast\b/i, /\bprice target\b.*\b(2030|2035|2040)\b/i,
+  /\b(should you buy|is it a buy|better buy|buy now)\b/i, /\b\d+ (best|top) stocks?\b/i,
+];
+const JUNK_SOURCE = /\s-\s(yahoo finance( \w+)?|investing\.com|marketbeat|stocktwits|tipranks|macrotrends|companiesmarketcap|robinhood|public\.com|stockanalysis)\s*$/i;
+function cleanTitles(titles) {
+  const seen = new Set();
+  return titles.filter((t) => {
+    if (JUNK_TITLE.some((re) => re.test(t))) return false;
+    if (JUNK_SOURCE.test(t) && /(price|quote|history|ราคา|profile)/i.test(t)) return false;
+    const key = t.replace(/\s-\s[^-]+$/, "").toLowerCase().replace(/[^a-z0-9ก-๙]/g, "").slice(0, 50);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 const CLICKBAIT = /^(why|here'?s why|what'?s (going on|happening|behind))\b|\?|what (happened|to know)|\bexplained\b|here'?s what|should you (buy|sell)|is .{0,40} a (buy|sell)\b|\b(stock|shares)\b.*\b(down|falling|falls|dropping|drops|plunging|sinking|sinks|sliding|slumping|tumbling|soaring|jumping)\b.*\btoday\b/i;
 
 async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STOCK) {
@@ -171,8 +190,9 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
       const titles = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].map((m) =>
         m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()
       );
-      // stock headlines only: drop clickbait like "Why X stock is falling today" (no real event); topics keep everything
-      const kept = ticker ? titles.filter((t) => !CLICKBAIT.test(t)) : titles;
+      // drop non-news pages/duplicates; stock headlines also drop clickbait like "Why X stock is falling today"; topics keep the rest
+      const cleaned = cleanTitles(titles);
+      const kept = ticker ? cleaned.filter((t) => !CLICKBAIT.test(t)) : cleaned;
       if (kept.length) return kept.slice(0, limit).map((t) => `- ${t}`);
     } catch {}
   }
