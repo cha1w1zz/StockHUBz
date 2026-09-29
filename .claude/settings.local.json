@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx wrangler deploy*)",
+      "Bash(npx wrangler whoami*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push*)",
+      "PowerShell(git push*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "PowerShell(npx wrangler deploy*)",
+      "PowerShell(npx.cmd wrangler deploy*)",
+      "PowerShell(git add *)",
+      "PowerShell(git commit *)"
+    ]
+  }
+}
