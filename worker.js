@@ -157,15 +157,18 @@ async function recipients(env) {
 // Drop non-news results (quote/profile pages, price tables, listicles, ads) and near-duplicates.
 const JUNK_TITLE = [
   /stock price[, ]/i, /share price/i, /quote\b.*\bhistory/i, /price,? news,? quote/i,
+  /ข่าวสารและพาดหัว|พาดหัวล่าสุด/, /\bsponsored\b/i,
   /ราคาหุ้น.*(ข่าว|ใบเสนอราคา|ประวัติ)/, /ใบเสนอราคา/,
   /\b(company )?profile\b/i, /\bhistorical (prices|data)\b/i, /\bstock forecast\b/i, /\bprice target\b.*\b(2030|2035|2040)\b/i,
   /\b(should you buy|is it a buy|better buy|buy now)\b/i, /\b\d+ (best|top) stocks?\b/i,
 ];
 const JUNK_SOURCE = /\s-\s(yahoo finance( \w+)?|investing\.com|marketbeat|stocktwits|tipranks|macrotrends|companiesmarketcap|robinhood|public\.com|stockanalysis)\s*$/i;
+const BLOCK_SOURCE = /\s-\s(yahoo finance( \w+)?|stockstotrade|tradingview|gurufocus|tikr( terminal)?|stock titan|ainvest|moomoo|webull|stockinvest\.us|wallstreetzen|barchart)\s*$/i;
 function cleanTitles(titles) {
   const seen = new Set();
   return titles.filter((t) => {
     if (JUNK_TITLE.some((re) => re.test(t))) return false;
+    if (BLOCK_SOURCE.test(t)) return false;
     if (JUNK_SOURCE.test(t) && /(price|quote|history|ราคา|profile)/i.test(t)) return false;
     const key = t.replace(/\s-\s[^-]+$/, "").toLowerCase().replace(/[^a-z0-9ก-๙]/g, "").slice(0, 50);
     if (seen.has(key)) return false;
@@ -193,7 +196,7 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
       // drop non-news pages/duplicates; stock headlines also drop clickbait like "Why X stock is falling today"; topics keep the rest
       const cleaned = cleanTitles(titles);
       const kept = ticker ? cleaned.filter((t) => !CLICKBAIT.test(t)) : cleaned;
-      if (kept.length) return kept.slice(0, limit).map((t) => `- ${t}`);
+      if (kept.length) return kept.slice(0, limit).map((t) => `- ${t.replace(/\s-\s[^-]+$/, "")}`);
     } catch {}
   }
   return [];
@@ -239,6 +242,13 @@ async function searchSymbols(q) {
   }
 }
 
+// LINE turns URLs and bare domains into preview cards, so remove them from the AI text.
+const stripLinks = (s) =>
+  s
+    .replace(/https?:\/\/\S+|www\.\S+/gi, "")
+    .replace(/\b[\w-]+(?:\.[\w-]+)*\.(?:com|net|org|io|co|ai|us|info|biz|tv)\b(?:\/\S*)?/gi, (m) => m.split(".")[0].replace(/^www$/i, ""))
+    .replace(/[ \t]+([)\],.])/g, "$1").replace(/\(\s*\)/g, "").replace(/[ \t]{2,}/g, " ");
+
 async function summarize(env, data) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
   const dd = `${String(now.getUTCDate()).padStart(2, "0")}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${now.getUTCFullYear() + 543}`;
@@ -270,7 +280,7 @@ async function summarize(env, data) {
   const j = await r.json();
   const choice = j.choices[0];
   // safety net: if the model still drops a stock's 'จับตา' line, add the honest fallback instead of leaving it out
-  const out = choice.message.content
+  const out = stripLinks(choice.message.content)
     .split(/(?=📌)/)
     .map((b) => (b.startsWith("📌") && !b.includes("จับตา") ? `${b.trimEnd()}\n• จับตา: ไม่มีข้อมูลเพิ่มเติม\n\n` : b))
     .join("");
