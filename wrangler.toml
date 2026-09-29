@@ -10,3 +10,7 @@ crons = ["30 12 * * *", "0 3 * * *"]
 [[kv_namespaces]]
 binding = "KV"
 id = "42958c2b4eda4c638af004c95fa7c29a"
+
+# keep Worker logs so past failures can be inspected in the dashboard
+[observability]
+enabled = true

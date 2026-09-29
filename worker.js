@@ -1,14 +1,15 @@
 // Cloudflare Worker: US stock news -> LINE. Cron push + LINE chat commands (owner only).
 const MODEL = "google/gemini-2.5-flash-lite";
-const NEWS_PER_STOCK = 4;
+const NEWS_PER_STOCK = 6;
 const DEFAULT_STOCKS = ["NVDA", "MSFT", "GOOGL", "AMD", "PLTR"]; // AI theme
-const MAX_STOCKS_ADMIN = 10;
+const MAX_STOCKS_ADMIN = 15;
 const MAX_STOCKS_USER = 5;
 const DEFAULT_TOPICS = ["artificial intelligence AI industry"];
-const MAX_TOPICS_ADMIN = 3;
+const MAX_TOPICS_ADMIN = 5;
 const MAX_TOPICS_USER = 2;
-const NEWS_PER_TOPIC = 5;
+const NEWS_PER_TOPIC = 6;
 const MAX_USERS = 10; // including the admin
+const MAX_MANUAL_PER_DAY = 5; // "สรุป" presses per non-admin user per day (Bangkok time)
 
 // Design tokens (accessible contrast; min text 12px, tap targets >= 44px)
 const GREEN = "#08784B";
@@ -172,6 +173,7 @@ function cleanTitles(titles) {
     return true;
   });
 }
+const CLICKBAIT = /^(why|here'?s why|what'?s (going on|happening|behind))\b|\?|what (happened|to know)|\bexplained\b|here'?s what|should you (buy|sell)|is .{0,40} a (buy|sell)\b|\b(stock|shares)\b.*\b(down|falling|falls|dropping|drops|plunging|sinking|sinks|sliding|slumping|tumbling|soaring|jumping)\b.*\btoday\b/i;
 
 async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STOCK) {
   const q = encodeURIComponent(query);
@@ -181,14 +183,17 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
       if (i) await new Promise((r) => setTimeout(r, 400 * i));
       const res = await fetch(`https://news.google.com/rss/search?q=${q}+when:${win}&hl=en-US&gl=US&ceid=US:en`, {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
+        signal: AbortSignal.timeout(6000),
       });
       if (!res.ok) continue;
       const xml = await res.text();
       const titles = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].map((m) =>
         m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()
       );
-      const good = cleanTitles(titles);
-      if (good.length) return good.slice(0, limit).map((t) => `- ${t}`);
+      // drop non-news pages/duplicates; stock headlines also drop clickbait like "Why X stock is falling today"; topics keep the rest
+      const cleaned = cleanTitles(titles);
+      const kept = ticker ? cleaned.filter((t) => !CLICKBAIT.test(t)) : cleaned;
+      if (kept.length) return kept.slice(0, limit).map((t) => `- ${t}`);
     } catch {}
   }
   return [];
@@ -198,6 +203,7 @@ async function fetchPrice(ticker) {
   try {
     const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d`, {
       headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) return "ไม่มีข้อมูลราคา";
     const j = await res.json();
@@ -220,6 +226,7 @@ async function searchSymbols(q) {
   try {
     const res = await fetch(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0&listsCount=0`, {
       headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) return null;
     const j = await res.json();
@@ -241,26 +248,32 @@ async function summarize(env, data) {
     "- แปลพาดหัวข่าวเป็นภาษาไทยทุกข้อ ห้ามคัดลอกประโยคภาษาอังกฤษ (ยกเว้นชื่อบริษัท ตัวย่อหุ้น และศัพท์เฉพาะ เช่น AI, GPU)\n" +
     "- ทุกหุ้นต้องมีครบทั้ง 4 บรรทัดตามแบบด้านล่าง ห้ามข้ามบรรทัดไหนเด็ดขาด โดยเฉพาะ 'จับตา'\n" +
     "- ใช้เฉพาะตัวเลขและพาดหัวที่ให้มา ห้ามเดา ห้ามแนะนำซื้อขาย ข้อมูลไม่พอให้เขียนว่า ไม่มีข้อมูลเพิ่มเติม\n" +
-    "- เลือกเฉพาะข่าวที่นักลงทุนอยากอ่านจริง (ผลประกอบการ ดีลใหญ่ ผลิตภัณฑ์ กฎหมาย ผู้บริหาร) ข้ามหน้าราคา/ประวัติหุ้น/บทความแนะนำซื้อ\n" +
+    "- ถ้ามีพาดหัวเรื่องเดียวกันซ้ำหลายสำนัก อย่าเล่าซ้ำ แต่ยังต้องเขียนข่าวเด่นและสรุปให้ครบเท่าเดิม ห้ามย่อหรือตัดเนื้อหาเพราะเรื่องซ้ำ\n" +
+    "- เลือกข่าวที่มีเหตุการณ์จริง (งบ ดีล กฎระเบียบ ผลิตภัณฑ์ ตัวเลขเศรษฐกิจ) พาดหัวเรียกคลิกที่ถามว่าทำไมหุ้นขึ้น/ร่วง หรือ 'เกิดอะไรขึ้น' ให้ข้าม ห้ามเขียนข่าวเด่นที่แค่บอกว่าหุ้นขึ้น/ร่วง หรืออธิบายสาเหตุราคาเอง (ราคาใช้เฉพาะบรรทัดราคาและแนวโน้ม) ถ้าไม่มีข่าวเนื้อๆ เลยให้เขียนว่า ไม่มีข่าวเด่นใหม่ ห้ามตัดบรรทัดทิ้ง\n" +
     "- กระชับ แต่ห้ามตัดบรรทัด\n\n" +
     "แบบสำหรับส่วน '## หัวข้อ:' (ทีละหัวข้อ):\n" +
-    "📰 ชื่อหัวข้อ\n• ข่าวเด่น 2-3 ข้อ แปลเป็นไทย\n\n" +
+    "📰 ชื่อหัวข้อ\n• ข่าวเด่น 3-4 ข้อ แปลเป็นไทย\n\n" +
     "แบบสำหรับแต่ละหุ้น (ทำให้ครบทุกตัว):\n" +
     "📌 ตัวย่อหุ้น · ราคาปิด (±% จากวันก่อน)\n" +
     "• แนวโน้ม: 5 วัน ±% · ตำแหน่งเทียบช่วง 52 สัปดาห์ (จากตัวเลขที่ให้)\n" +
-    "• ข่าวเด่น: (แปลไทย 1 ข้อ) แล้วตามด้วย 🟢 บวก / 🔴 ลบ / ⚪ กลาง\n" +
+    "• ข่าวเด่น: (แปลไทย 2 ข้อ ข้อละ 1 บรรทัด) แต่ละข้อตามด้วย 🟢 บวก / 🔴 ลบ / ⚪ กลาง ถ้ามีข่าวไม่ถึง 2 ข้อให้เขียนเท่าที่มี\n" +
     "• อารมณ์ข่าว: บวก X / ลบ Y / กลาง Z (นับจากพาดหัวที่ให้ นับจริง)\n" +
-    "• จับตา: ความเสี่ยงหรือสิ่งที่ควรติดตาม 1 ข้อ อ้างจากพาดหัวที่ให้ (ถ้าไม่มีเขียนว่า ไม่มีข้อมูลเพิ่มเติม)\n\n" +
+    "• จับตา: ต้องมีทุกหุ้น ถ้าพาดหัวที่ให้พูดถึงความเสี่ยงหรือเหตุการณ์ที่ต้องติดตาม (เช่น ประกาศงบ กฎระเบียบ คู่แข่ง) ให้สรุป 1 ข้อ ถ้าไม่มีจริงๆ ให้เขียนตรงๆ ว่า ไม่มีข้อมูลเพิ่มเติม ห้ามคิดเองหรือเดาเพื่อให้ครบ\n\n" +
     "ไม่ใช้ markdown (ห้าม * # **) เว้นบรรทัดระหว่างหุ้น\n\n" + data;
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY.trim()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 2000, temperature: 0.2 }),
+    body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 4000, temperature: 0.2 }),
+    signal: AbortSignal.timeout(25000), // waitUntil dies at ~30s; fail loudly ("สรุปไม่สำเร็จ") before that instead of silence
   });
   if (!r.ok) throw new Error(`OpenRouter ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const j = await r.json();
   const choice = j.choices[0];
-  const out = choice.message.content;
+  // safety net: if the model still drops a stock's 'จับตา' line, add the honest fallback instead of leaving it out
+  const out = choice.message.content
+    .split(/(?=📌)/)
+    .map((b) => (b.startsWith("📌") && !b.includes("จับตา") ? `${b.trimEnd()}\n• จับตา: ไม่มีข้อมูลเพิ่มเติม\n\n` : b))
+    .join("");
   return choice.finish_reason === "length" ? out + "\n\n(สรุปยาวเกินจึงถูกตัดท้าย ลดจำนวนหุ้นหรือหัวข้อได้)" : out;
 }
 
@@ -307,7 +320,17 @@ async function pushSummary(env, userId, cache = new Map(), skipEmpty = false, sl
   }
   const now = new Date(Date.now() + 7 * 3600 * 1000);
   const stamp = `${String(now.getUTCDate()).padStart(2, "0")}/${String(now.getUTCMonth() + 1).padStart(2, "0")} ${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
-  await push(`📈 สรุปข่าว ${stamp}\n\n${summary.slice(0, 4600)}\n\n(ไม่ใช่คำแนะนำการลงทุน)`);
+  // LINE text cap is 5000 chars and a push takes up to 5 messages: split on blank lines so long summaries aren't cut
+  const chunks = [];
+  let cur = "";
+  for (const block of `📈 สรุปข่าว ${stamp}\n\n${summary}\n\n(ไม่ใช่คำแนะนำการลงทุน)`.split("\n\n")) {
+    if (cur && cur.length + block.length + 2 > 4500) {
+      chunks.push(cur);
+      cur = block;
+    } else cur = cur ? `${cur}\n\n${block}` : block;
+  }
+  if (cur) chunks.push(cur);
+  await line(env, "push", { to: userId, messages: chunks.slice(0, 5).flatMap((c) => text(c)) });
 }
 
 async function validSignature(env, body, sig) {
@@ -394,9 +417,21 @@ async function handleCommand(env, ctx, ev, uid) {
 
   if (cmd === "สรุป") {
     if (await env.KV.get("cd:" + uid)) return reply("รอ 1 นาทีค่อยกดใหม่");
+    if (!isAdmin(env, uid)) {
+      const dayKey = `dc:${uid}:${new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10)}`;
+      const used = parseInt((await env.KV.get(dayKey)) || "0", 10);
+      if (used >= MAX_MANUAL_PER_DAY) return reply(`วันนี้กดสรุปครบ ${MAX_MANUAL_PER_DAY} ครั้งแล้ว พรุ่งนี้ค่อยกดใหม่ (ยังได้รับสรุปอัตโนมัติตามปกติ)`);
+      await env.KV.put(dayKey, String(used + 1), { expirationTtl: 172800 });
+    }
     await env.KV.put("cd:" + uid, "1", { expirationTtl: 60 });
     await reply("⏳ กำลังสรุป รอสักครู่");
-    ctx.waitUntil(pushSummary(env, uid));
+    // waitUntil is killed silently at ~30s, so cap the whole job and tell the user instead of going quiet
+    const TIMED_OUT = Symbol();
+    ctx.waitUntil(
+      Promise.race([pushSummary(env, uid), new Promise((r) => setTimeout(() => r(TIMED_OUT), 26000))]).then((x) =>
+        x === TIMED_OUT ? line(env, "push", { to: uid, messages: text("⚠️ สรุปไม่ทัน (ช้าเกิน) ลองกดใหม่อีกครั้ง") }) : undefined
+      )
+    );
     return;
   }
 
