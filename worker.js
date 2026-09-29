@@ -21,6 +21,7 @@ const btn = (label, msg, primary = false) => ({
   type: "button", height: "md", style: primary ? "primary" : "secondary", color: primary ? GREEN : undefined,
   action: { type: "message", label, text: msg },
 });
+const pair = (a, b) => ({ type: "box", layout: "horizontal", spacing: "sm", contents: [a, b] });
 const step = (n, title, desc) => ({
   type: "box", layout: "horizontal", spacing: "md", margin: "lg",
   contents: [
@@ -115,7 +116,13 @@ async function adminCard(env) {
       },
       footer: {
         type: "box", layout: "vertical", spacing: "sm",
-        contents: [btn("⚡ สรุปเลย", "สรุป", true), btn("📋 เมนูของฉัน", "เมนู")],
+        contents: [
+          btn("⚡ สรุปเลย", "สรุป", true),
+          pair(btn("➕ เพิ่มหุ้น", "เพิ่มหุ้น"), btn("📰 เพิ่มหัวข้อ", "เพิ่มหัวข้อ")),
+          pair(btn("⏰ ตั้งรอบ", "ตั้งรอบ"), btn("🗑 ลบรายการ", "ลบรายการ")),
+          pair(btn("👥 รายชื่อ", "คนใช้"), btn("🔄 รีเฟรช", "แอดมิน")),
+          btn("📋 เมนูของฉัน", "เมนู"),
+        ],
       },
     },
   }];
