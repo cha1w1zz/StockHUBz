@@ -377,6 +377,11 @@ async function handleCommand(env, ctx, ev, uid) {
     const lines = members.map((m, i) => `${i + 1}. ...${m.slice(-6)}`);
     return reply(`ผู้ใช้ ${members.length + 1}/${MAX_USERS} (รวมแอดมิน)\n${lines.join("\n") || "(ยังไม่มีสมาชิกอื่น)"}`);
   }
+  if (admin && cmd === "ประกาศ") {
+    if (!rest) return reply("พิมพ์ ประกาศ ตามด้วยข้อความ จะส่งหาทุกคนที่เป็นเพื่อนกับบอท");
+    await line(env, "broadcast", { messages: text(rest) });
+    return reply("✅ ส่งประกาศหาทุกคนแล้ว");
+  }
   if (admin && cmd === "เตะ") {
     const members = await getMembers(env);
     const n = parseInt(arg, 10);
