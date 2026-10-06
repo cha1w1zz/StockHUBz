@@ -40,7 +40,6 @@ const row = (label, value, empty = false) => ({
     { type: "text", text: value, size: "md", weight: "bold", color: empty ? WARN : INK, wrap: true },
   ],
 });
-const roundsLabel = (r) => (r === "am" ? "เฉพาะเช้า 10:00" : r === "pm" ? "เฉพาะเย็น 19:30" : "เช้า 10:00 + เย็น 19:30");
 
 // Main menu card. Doubles as a dashboard of the user's own lists.
 function menuCard(me, { isNew = false, admin = false } = {}) {
@@ -51,12 +50,12 @@ function menuCard(me, { isNew = false, admin = false } = {}) {
     ? [
         step(1, "กด ➕ เพิ่มหุ้น", `เลือกหุ้นที่สนใจ (สูงสุด ${maxS} ตัว)`),
         step(2, "กด 📰 เพิ่มหัวข้อ", `เช่น พลังงาน AI คริปโต (สูงสุด ${maxT} หัวข้อ)`),
-        step(3, "กด ⚡ สรุปเลย", "หรือรอรับอัตโนมัติ 10:00 และ 19:30"),
+        step(3, "กด ⚡ สรุปเลย", "หรือรอรับอัตโนมัติทุกวัน 19:30"),
       ]
     : [
         row(`📈 หุ้น (${me.stocks.length}/${maxS})`, me.stocks.join(" · ") || "ยังไม่มี กด ➕ เพิ่มหุ้น", !me.stocks.length),
         row(`📰 หัวข้อ (${me.topics.length}/${maxT})`, me.topics.join(" · ") || "ยังไม่มี กด 📰 เพิ่มหัวข้อ", !me.topics.length),
-        row("⏰ รอบส่ง", roundsLabel(me.rounds)),
+        row("⏰ รอบส่งอัตโนมัติ", "ทุกวัน 19:30"),
       ];
   return [{
     type: "flex",
@@ -73,7 +72,7 @@ function menuCard(me, { isNew = false, admin = false } = {}) {
       body: { type: "box", layout: "vertical", paddingAll: "16px", contents: body },
       footer: {
         type: "box", layout: "vertical", spacing: "sm",
-        contents: [btn("⚡ สรุปเลย", "สรุป", true), btn("➕ เพิ่มหุ้น", "เพิ่มหุ้น"), btn("📰 เพิ่มหัวข้อ", "เพิ่มหัวข้อ"), btn("⏰ ตั้งรอบ", "ตั้งรอบ"), btn("🗑 ลบรายการ", "ลบรายการ")],
+        contents: [btn("⚡ สรุปเลย", "สรุป", true), btn("➕ เพิ่มหุ้น", "เพิ่มหุ้น"), btn("📰 เพิ่มหัวข้อ", "เพิ่มหัวข้อ"), btn("🗑 ลบรายการ", "ลบรายการ")],
       },
     },
   }];
@@ -90,7 +89,7 @@ async function adminCard(env) {
       contents: [
         { type: "box", layout: "vertical", flex: 1, contents: [
           { type: "text", text: `${i + 1}. ...${m.slice(-6)}`, size: "sm", weight: "bold", color: INK },
-          { type: "text", text: `หุ้น ${u.stocks.length} · หัวข้อ ${u.topics.length}${u.rounds && u.rounds !== "both" ? " · " + (u.rounds === "am" ? "เช้า" : "เย็น") : ""}`, size: "xs", color: MUTED },
+          { type: "text", text: `หุ้น ${u.stocks.length} · หัวข้อ ${u.topics.length}`, size: "xs", color: MUTED },
         ] },
         { type: "button", height: "md", style: "secondary", flex: 0, action: { type: "message", label: "เตะ", text: `เตะ ${i + 1}` } },
       ],
@@ -119,7 +118,7 @@ async function adminCard(env) {
         contents: [
           btn("⚡ สรุปเลย", "สรุป", true),
           pair(btn("➕ เพิ่มหุ้น", "เพิ่มหุ้น"), btn("📰 เพิ่มหัวข้อ", "เพิ่มหัวข้อ")),
-          pair(btn("⏰ ตั้งรอบ", "ตั้งรอบ"), btn("🗑 ลบรายการ", "ลบรายการ")),
+          btn("🗑 ลบรายการ", "ลบรายการ"),
           pair(btn("👥 รายชื่อ", "คนใช้"), btn("🔄 รีเฟรช", "แอดมิน")),
           btn("📋 เมนูของฉัน", "เมนู"),
         ],
@@ -422,9 +421,6 @@ async function handleCommand(env, ctx, ev, uid) {
     const pick = ["AI", "nuclear energy", "oil price", "crypto"].filter((t) => !me.topics.includes(t.toLowerCase()));
     return reply("เลือกหัวข้อด้านล่าง หรือพิมพ์เองเช่น หัวข้อ+ electric vehicle (ภาษาอังกฤษแม่นกว่า)", pick.map((t) => qi(t, `หัวข้อ+ ${t}`)));
   }
-  if (cmd === "ตั้งรอบ") {
-    return reply("อยากรับสรุปตอนไหน?", [qi("เช้า+เย็น", "รอบ 2"), qi("เฉพาะเช้า 10:00", "รอบ 1 เช้า"), qi("เฉพาะเย็น 19:30", "รอบ 1 เย็น")]);
-  }
   if (cmd === "ลบรายการ") {
     const items = [...me.stocks.map((t) => qi(`ลบ ${t}`, `ลบ ${t}`)), ...me.topics.map((t) => qi(`ลบ ${t}`.slice(0, 20), `หัวข้อ- ${t}`))];
     return items.length ? reply("เลือกรายการที่จะลบ", items.slice(0, 13)) : reply("รายการยังว่าง ไม่มีอะไรให้ลบ", after);
@@ -445,14 +441,6 @@ async function handleCommand(env, ctx, ev, uid) {
     await env.KV.put("members", JSON.stringify(members.filter((m) => m !== gone)));
     await env.KV.delete("u:" + gone);
     return line(env, "reply", { replyToken: ev.replyToken, messages: [...text(`✅ เตะผู้ใช้ลำดับ ${n} แล้ว`), ...(await adminCard(env))] });
-  }
-
-  if (cmd === "รอบ") {
-    const map = { "2": "both", "1 เช้า": "am", "1 เย็น": "pm" };
-    const v = map[rest];
-    if (!v) return reply("พิมพ์: รอบ 2 (เช้า+เย็น) · รอบ 1 เช้า (10:00) · รอบ 1 เย็น (19:30)");
-    await saveUser(env, uid, { ...me, rounds: v });
-    return reply(`✅ ตั้งรอบแล้ว: ${rest === "2" ? "วันละ 2 รอบ (10:00 และ 19:30)" : rest === "1 เช้า" ? "เฉพาะเช้า 10:00" : "เฉพาะเย็น 19:30"}`, after);
   }
 
   if (cmd === "สรุป") {
@@ -523,10 +511,9 @@ async function handleCommand(env, ctx, ev, uid) {
 
 export default {
   async scheduled(event, env, ctx) {
-    // People with empty lists only get the reminder on the morning run (03:00 UTC = 10:00 BKK)
-    const morning = event.cron === "0 3 * * *";
-    const skipEmpty = !morning;
-    const slot = morning ? "am" : "pm";
+    // once a day (LINE free push quota); people with empty lists are skipped so they don't burn quota
+    const skipEmpty = true;
+    const slot = null;
     ctx.waitUntil(
       (async () => {
         const cache = new Map();
