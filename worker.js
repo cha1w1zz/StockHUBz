@@ -195,7 +195,10 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
         signal: AbortSignal.timeout(6000),
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        console.log("news http", res.status, query, win);
+        continue;
+      }
       const xml = await res.text();
       const titles = [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].map((m) =>
         m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()
@@ -204,7 +207,10 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
       const cleaned = cleanTitles(titles);
       const kept = ticker ? cleaned.filter((t) => !CLICKBAIT.test(t)) : cleaned;
       if (kept.length) return kept.slice(0, limit).map((t) => `- ${t.replace(/\s-\s[^-]+$/, "")}`);
-    } catch {}
+      console.log("news empty", query, win, "raw", titles.length, "cleaned", cleaned.length, "kept", kept.length);
+    } catch (e) {
+      console.log("news error", query, win, String(e));
+    }
   }
   return [];
 }
