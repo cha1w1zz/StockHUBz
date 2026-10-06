@@ -433,6 +433,13 @@ async function handleCommand(env, ctx, ev, uid) {
     const lines = members.map((m, i) => `${i + 1}. ...${m.slice(-6)}`);
     return reply(`ผู้ใช้ ${members.length + 1}/${MAX_USERS} (รวมแอดมิน)\n${lines.join("\n") || "(ยังไม่มีสมาชิกอื่น)"}`);
   }
+  if (admin && cmd === "ประกาศ") {
+    const body = msg.slice(cmd.length).trim(); // keep line breaks
+    if (!body) return reply("พิมพ์: ประกาศ ตามด้วยข้อความ (ส่งถึงผู้ใช้ทุกคน รวมคุณ นับโควตา 1 ข้อความต่อคน)");
+    const ids = await recipients(env);
+    await Promise.all(ids.map((id) => line(env, "push", { to: id, messages: text(`📢 ประกาศจาก MARKII\n${body}`) }).catch((e) => console.log("announce failed", String(e)))));
+    return reply(`✅ ส่งประกาศแล้ว ${ids.length} คน`);
+  }
   if (admin && cmd === "เตะ") {
     const members = await getMembers(env);
     const n = parseInt(arg, 10);
