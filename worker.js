@@ -185,15 +185,30 @@ function cleanTitles(titles) {
 }
 const CLICKBAIT = /^(why|here'?s why|what'?s (going on|happening|behind))\b|\?|what (happened|to know)|\bexplained\b|here'?s what|should you (buy|sell)|is .{0,40} a (buy|sell)\b|\b(stock|shares)\b.*\b(down|falling|falls|dropping|drops|plunging|sinking|sinks|sliding|slumping|tumbling|soaring|jumping)\b.*\btoday\b/i;
 
-async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STOCK) {
+// runs fn with at most n in flight; Google News answers 503/timeouts when ~15 searches fire at once
+function makeGate(n) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (active >= n || !queue.length) return;
+    active++;
+    const { fn, res, rej } = queue.shift();
+    fn().then(res, rej).finally(() => { active--; next(); });
+  };
+  return (fn) => new Promise((res, rej) => { queue.push({ fn, res, rej }); next(); });
+}
+const msLeft = (deadline, cap) => Math.min(cap, deadline - Date.now());
+
+async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STOCK, deadline = Infinity) {
   const q = encodeURIComponent(query);
   // Google sometimes returns empty/blocked when many requests fire at once, so retry and widen the window
-  for (const [i, win] of ["2d", "2d", "7d"].entries()) {
+  for (const [i, win] of ["2d", "7d"].entries()) {
     try {
-      if (i) await new Promise((r) => setTimeout(r, 400 * i));
+      if (msLeft(deadline, 4000) < 800) return []; // out of fetch budget: summarize with what we have
+      if (i) await new Promise((r) => setTimeout(r, 300));
       const res = await fetch(`https://news.google.com/rss/search?q=${q}+when:${win}&hl=en-US&gl=US&ceid=US:en`, {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
-        signal: AbortSignal.timeout(6000),
+        signal: AbortSignal.timeout(msLeft(deadline, 4000)),
       });
       if (!res.ok) {
         console.log("news http", res.status, query, win);
@@ -215,11 +230,11 @@ async function fetchNews(ticker, query = `${ticker} stock`, limit = NEWS_PER_STO
   return [];
 }
 
-async function fetchPrice(ticker) {
+async function fetchPrice(ticker, deadline = Infinity) {
   try {
     const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d`, {
       headers: { "User-Agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(Math.max(500, msLeft(deadline, 4000))),
     });
     if (!res.ok) return "ไม่มีข้อมูลราคา";
     const j = await res.json();
@@ -287,7 +302,7 @@ async function summarize(env, data) {
     method: "POST",
     headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY.trim()}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 4000, temperature: 0.2 }),
-    signal: AbortSignal.timeout(25000), // waitUntil dies at ~30s; fail loudly ("สรุปไม่สำเร็จ") before that instead of silence
+    signal: AbortSignal.timeout(15000), // fetch budget (12s) + this must stay under waitUntil's ~30s, or the whole run dies silently
   });
   if (!r.ok) throw new Error(`OpenRouter ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const j = await r.json();
@@ -318,6 +333,8 @@ async function pushSummary(env, userId, cache = new Map(), skipEmpty = false, sl
     return cache.get(key);
   };
   const push = (t) => line(env, "push", { to: userId, messages: text(t) });
+  const gate = makeGate(3);
+  const deadline = Date.now() + 12000;
   const u = await getUser(env, userId);
   // slot is "am"/"pm" on cron runs; users can opt out of one round
   if (slot && u && u.rounds && u.rounds !== "both" && u.rounds !== slot) return;
@@ -326,11 +343,11 @@ async function pushSummary(env, userId, cache = new Map(), skipEmpty = false, sl
     return line(env, "push", { to: userId, messages: menuCard(u || { stocks: [], topics: [] }, { admin: isAdmin(env, userId) }) });
   }
   const topicParts = await Promise.all(
-    u.topics.map(async (t) => `## หัวข้อ: ${t}\n${(await memo("t:" + t, () => fetchNews("", `${t} news`, NEWS_PER_TOPIC))).join("\n") || "(ดึงข่าวไม่ได้ตอนนี้ ให้เขียนว่า ไม่มีข่าวใหม่)"}`)
+    u.topics.map(async (t) => `## หัวข้อ: ${t}\n${(await memo("t:" + t, () => gate(() => fetchNews("", `${t} news`, NEWS_PER_TOPIC, deadline)))).join("\n") || "(ดึงข่าวไม่ได้ตอนนี้ ให้เขียนว่า ไม่มีข่าวใหม่)"}`)
   );
   const parts = await Promise.all(
     u.stocks.map(async (s) => {
-      const [price, news] = await Promise.all([memo("p:" + s, () => fetchPrice(s)), memo("s:" + s, () => fetchNews(s))]);
+      const [price, news] = await Promise.all([memo("p:" + s, () => gate(() => fetchPrice(s, deadline))), memo("s:" + s, () => gate(() => fetchNews(s, undefined, undefined, deadline)))]);
       return `## ${s}\nราคา: ${price}\nข่าว:\n${news.join("\n") || "(ดึงข่าวไม่ได้ตอนนี้ ให้เขียนว่า ไม่มีข่าวใหม่)"}`;
     })
   );
